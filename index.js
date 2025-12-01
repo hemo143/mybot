@@ -18,7 +18,7 @@ const api = new WooCommerceRestApi({
 });
 
 // ==========================================
-// 🛑 خريطة الأقسام
+// خريطة الأقسام
 // ==========================================
 const CATEGORY_MAP = [
     { name: '❄️ تلاجات', id: 101 },  
@@ -30,7 +30,7 @@ const CATEGORY_MAP = [
 // تشغيل السيرفر
 const bot = new TelegramBot(token, {polling: true});
 const userStates = {}; 
-app.get('/', (req, res) => res.send('Bot is running with Verification Logic'));
+app.get('/', (req, res) => res.send('Bot is running with Sale Date Cleaner'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running`));
 
@@ -65,6 +65,7 @@ bot.on('message', async (msg) => {
             if (response.data.length > 0) {
                 const product = response.data[0];
                 const catName = product.categories.length > 0 ? product.categories[0].name : 'بدون قسم';
+                
                 const typeEmoji = product.type === 'variable' ? '🔀 متغير' : '📦 بسيط';
 
                 userStates[chatId] = { 
@@ -103,17 +104,22 @@ bot.on('message', async (msg) => {
         const state = userStates[chatId];
         const input = text; 
 
+        // 1. تعديل السعر المباشر
         if (state.step === 'awaiting_price') {
             const price = toEnglish(input);
             if (!isNaN(price)) {
+                // هنا التعديل: بنمسح التواريخ كمان
                 await updateProductSmart(chatId, state, { 
                     regular_price: price.toString(), 
-                    sale_price: "" 
+                    sale_price: "",
+                    date_on_sale_from: null, // مسح التاريخ
+                    date_on_sale_to: null    // مسح التاريخ
                 });
             } else {
                 bot.sendMessage(chatId, "❌ رقم غير صحيح.");
             }
         }
+        // 2. خصم نسبة
         else if (state.step === 'awaiting_discount') {
             const percent = toEnglish(input);
             if (!isNaN(percent)) {
@@ -122,10 +128,13 @@ bot.on('message', async (msg) => {
                 const newPrice = Math.round(oldPrice - discountAmount);
                 await updateProductSmart(chatId, state, { 
                     regular_price: oldPrice.toString(), 
-                    sale_price: newPrice.toString() 
+                    sale_price: newPrice.toString(),
+                    date_on_sale_from: null,
+                    date_on_sale_to: null
                 });
             }
         }
+        // 3. تعديل الاسم
         else if (state.step === 'awaiting_name') {
             await api.put(`products/${state.id}`, { name: input });
             bot.sendMessage(chatId, `📝 تم تعديل الاسم.`);
@@ -182,53 +191,55 @@ bot.on('callback_query', async (query) => {
 });
 
 // ==========================================
-// 🔥 دالة التحديث مع الفحص الذاتي (Double Check)
+// 🔥 دالة التحديث والتحقق (النسخة النووية 💣)
 // ==========================================
 async function updateProductSmart(chatId, productState, data, isStock = false) {
     try {
-        bot.sendMessage(chatId, "⏳ جاري التنفيذ والتحقق...");
+        bot.sendMessage(chatId, "⏳ جاري التنظيف والتحديث...");
 
-        // 1. تحديث المنتج
+        // 1. تحديث المنتج الأب
         let parentData = { ...data };
         if (productState.type === 'variable' && !isStock) {
             delete parentData.regular_price;
             delete parentData.sale_price;
+            delete parentData.date_on_sale_from;
+            delete parentData.date_on_sale_to;
         }
 
         if (Object.keys(parentData).length > 0) {
             await api.put(`products/${productState.id}`, parentData);
         }
 
+        // 2. تحديث النسخ (Variations)
         if (productState.type === 'variable') {
             const variations = await api.get(`products/${productState.id}/variations`, { per_page: 50 });
             if (variations.data.length > 0) {
+                // نحدث كل نسخة ونمسح تواريخها برضه
                 const promises = variations.data.map(v => api.put(`products/${productState.id}/variations/${v.id}`, data));
                 await Promise.all(promises);
             }
         }
 
         // =====================================
-        // 🕵️‍♂️ خطوة التحقق (الجديدة)
+        // 🕵️‍♂️ خطوة التحقق
         // =====================================
-        
-        // ننتظر ثانية واحدة عشان الداتا بيز تحدث نفسها
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 2000)); // ننتظر 2 ثانية
 
-        // نسأل الموقع: السعر كام دلوقتي؟
+        // نسأل الموقع
         const check = await api.get(`products/${productState.id}`);
         const currentPriceOnServer = check.data.price;
         const currentStock = check.data.stock_status;
 
-        // مقارنة النتائج
         if (isStock) {
              const statusText = currentStock === 'instock' ? 'متاح 🟢' : 'نفذ 🔴';
              bot.sendMessage(chatId, `✅ تم التأكيد! المخزون الآن: ${statusText}`);
         } 
         else if (data.regular_price) {
+             // مقارنة الرقم بالرقم (بغض النظر عن النص)
              if (parseInt(currentPriceOnServer) == parseInt(data.regular_price)) {
-                 bot.sendMessage(chatId, `✅ *تم التأكيد!* السعر في النظام أصبح: ${currentPriceOnServer} ج.م\n(لو ظاهر قدامك سعر قديم، ده كاش المتصفح - امسحه).`, {parse_mode: 'Markdown'});
+                 bot.sendMessage(chatId, `✅ *تم التغيير بنجاح!* السعر أصبح: ${currentPriceOnServer} ج.م`, {parse_mode: 'Markdown'});
              } else {
-                 bot.sendMessage(chatId, `⚠️ *تنبيه:* أنا بعت الأمر، بس السعر في النظام لسه ${currentPriceOnServer}!\n(ممكن يكون المنتج ده عليه عرض Sale Date شغال).`, {parse_mode: 'Markdown'});
+                 bot.sendMessage(chatId, `⚠️ *تنبيه:* أنا بعت الأمر ومسحت التواريخ القديمة، بس النظام لسه قاري السعر ${currentPriceOnServer}!\n(ممكن يكون فيه إضافة Cache قوية جداً.. جرب تشوف الموقع بعد دقيقة).`, {parse_mode: 'Markdown'});
              }
         } else {
              bot.sendMessage(chatId, `✅ تم.`);
