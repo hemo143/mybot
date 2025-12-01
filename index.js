@@ -1,11 +1,11 @@
 const TelegramBot = require('node-telegram-bot-api');
 const WooCommerceRestApi = require("@woocommerce/woocommerce-rest-api").default;
 const express = require('express');
-const nodemailer = require('nodemailer'); // مكتبة الإيميل
+const nodemailer = require('nodemailer');
 const app = express();
 
 // ==========================================
-// 1. الإعدادات (التوكن - الموقع - الإيميل)
+// 1. الإعدادات (تم وضع جميع البيانات)
 // ==========================================
 const token = '8337368193:AAFjUtxdXIRvaaPdpOU3-xogvKwRKG2xidU'; // توكن تليجرام
 
@@ -19,29 +19,29 @@ const api = new WooCommerceRestApi({
   timeout: 60000 
 });
 
-// إعدادات إرسال الإيميل
+// إعدادات الإيميل (تمت الإضافة بنجاح ✅)
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: 'influencetargetingmarketing3@gmail.com', // إيميل الراسل (بتاعك)
-    pass: 'xxxx xxxx xxxx xxxx' // ⚠️ هنا تضع App Password (وليس باسوورد الإيميل العادي)
+    user: 'influencetargetingmarketing3@gmail.com',
+    pass: 'cfsq nuen hozc mucu' // كلمة سر التطبيقات
   }
 });
-const ADMIN_EMAIL = 'influencetargetingmarketing3@gmail.com'; // الإيميل اللي هيستقبل الطلبات
+const ADMIN_EMAIL = 'influencetargetingmarketing3@gmail.com';
 
 // ==========================================
 // تشغيل السيرفر
 // ==========================================
 const bot = new TelegramBot(token, {polling: true});
-const userStates = {}; // ذاكرة المستخدم
-app.get('/', (req, res) => res.send('Advanced Bot Running...'));
+const userStates = {}; 
+app.get('/', (req, res) => res.send('Master Pricing Bot Running V3...'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running`));
 
-console.log('✅ البوت الاحترافي جاهز...');
+console.log('✅ البوت الشامل جاهز...');
 
 // ==========================================
-// 2. القائمة الرئيسية
+// 2. القائمة الرئيسية (Main Menu)
 // ==========================================
 function showMainMenu(chatId) {
     const opts = {
@@ -56,7 +56,7 @@ function showMainMenu(chatId) {
             one_time_keyboard: false
         }
     };
-    bot.sendMessage(chatId, "👋 أهلاً بك يا مدير!\nاختر خدمة من القائمة:", opts);
+    bot.sendMessage(chatId, "👋 مرحباً بك في لوحة التحكم! اختر العملية:", opts);
 }
 
 // ==========================================
@@ -68,22 +68,23 @@ bot.on('message', async (msg) => {
 
     if (!text) return;
 
-    // زر البداية أو أي كلمة ترحيب
-    if (text === '/start' || text === 'مرحبا' || text === 'هلا' || text === 'menu' || text === 'قائمة') {
+    // أوامر البداية
+    if (['/start', 'مرحبا', 'هلا', 'menu', 'قائمة'].includes(text.toLowerCase())) {
         userStates[chatId] = { step: 'idle' };
         showMainMenu(chatId);
         return;
     }
 
-    // --- توجيه القائمة الرئيسية ---
+    // 1️⃣ تعديل سعر منتج واحد
     if (text === '📦 تعديل سعر منتج (رابط)') {
         userStates[chatId] = { step: 'waiting_product_link' };
-        bot.sendMessage(chatId, "🔗 من فضلك أرسل *رابط المنتج* الآن:", {parse_mode: 'Markdown', reply_markup: { remove_keyboard: true }});
+        bot.sendMessage(chatId, "🔗 أرسل رابط المنتج الآن:", { reply_markup: { remove_keyboard: true }});
     }
+
+    // 2️⃣ تعديل تصنيف كامل
     else if (text === '📂 تعديل أسعار تصنيف كامل') {
-        // نعرض الأقسام الموجودة للاختيار
+        bot.sendMessage(chatId, "⏳ جاري جلب التصنيفات...");
         try {
-            bot.sendMessage(chatId, "⏳ جاري جلب الأقسام...");
             const cats = await api.get("products/categories", { per_page: 20 });
             const catButtons = cats.data.map(c => [{ text: c.name, callback_data: `cat_${c.id}_${c.name}` }]);
             
@@ -92,49 +93,44 @@ bot.on('message', async (msg) => {
             });
         } catch (e) { bot.sendMessage(chatId, "❌ خطأ في جلب الأقسام."); }
     }
+
+    // 3️⃣ تعديل كل المنتجات
     else if (text === '🌍 تعديل أسعار جميع المنتجات') {
-        bot.sendMessage(chatId, "⚠️ *تحذير:* هذا الخيار سيقوم بتعديل سعر *كل المنتجات في الموقع*.\n\nهل أنت متأكد؟", {
+        bot.sendMessage(chatId, "⚠️ *تحذير خطير:*\nهذا الخيار سيقوم بتعديل سعر *كل المنتجات في الموقع*.\n\nاختر العملية:", {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: '✅ نعم، استمر', callback_data: 'all_products_confirm' }],
-                    [{ text: '❌ إلغاء', callback_data: 'cancel_main' }]
+                    [{ text: '📈 زيادة شاملة %', callback_data: 'bulk_all_inc' }],
+                    [{ text: '📉 تخفيض شامل %', callback_data: 'bulk_all_dec' }]
                 ]
             }
         });
     }
+
+    // 4️⃣ طلبات أخرى (إيميل)
     else if (text === '📩 طلبات أخرى / دعم') {
         userStates[chatId] = { step: 'waiting_support_msg' };
-        bot.sendMessage(chatId, "📝 اكتب رسالتك أو طلبك الآن، وسأقوم بإرساله للإدارة فوراً:", { reply_markup: { remove_keyboard: true }});
+        bot.sendMessage(chatId, "📝 اكتب رسالتك أو طلبك الآن، وسأقوم بإرساله للإيميل فوراً:", { reply_markup: { remove_keyboard: true }});
     }
 
     // --- معالجة المدخلات حسب الحالة ---
     else if (userStates[chatId]) {
         const state = userStates[chatId];
 
-        // 1. استلام رابط المنتج
+        // معالجة الرابط
         if (state.step === 'waiting_product_link') {
-            if (text.includes('http')) {
-                // ... (نفس كود البحث عن المنتج القديم) ...
-                processProductLink(chatId, text);
-            } else {
-                bot.sendMessage(chatId, "❌ هذا ليس رابطاً صحيحاً. حاول مرة أخرى أو اكتب /start للرجوع.");
-            }
+            if (text.includes('http')) processProductLink(chatId, text);
+            else bot.sendMessage(chatId, "❌ رابط غير صحيح.");
         }
 
-        // 2. استلام القيمة (السعر أو النسبة) لمنتج واحد
-        else if (state.step === 'waiting_product_value') {
-            processProductUpdate(chatId, text);
+        // معالجة القيم (أرقام أو نسب)
+        else if (state.step === 'waiting_value') {
+            processValueInput(chatId, text);
         }
 
-        // 3. استلام النسبة للتصنيف أو الكل
-        else if (state.step === 'waiting_bulk_percent') {
-            processBulkUpdate(chatId, text);
-        }
-
-        // 4. استلام رسالة الدعم
+        // معالجة رسالة الدعم
         else if (state.step === 'waiting_support_msg') {
-            sendSupportEmail(chatId, text, msg.from.first_name);
+            sendEmail(chatId, text, msg.from.first_name);
         }
     }
 });
@@ -154,193 +150,196 @@ bot.on('callback_query', async (query) => {
     }
 
     // --- خيارات منتج واحد ---
-    if (['opt_increase', 'opt_decrease', 'opt_fixed'].includes(data)) {
-        userStates[chatId].actionType = data;
-        userStates[chatId].step = 'waiting_product_value';
-        
-        let msgText = "";
-        if (data === 'opt_increase') msgText = "📈 أدخل نسبة الزيادة % (رقم فقط):";
-        if (data === 'opt_decrease') msgText = "📉 أدخل نسبة التخفيض % (رقم فقط):";
-        if (data === 'opt_fixed') msgText = "💰 أدخل السعر الجديد (القيمة):";
-        
-        bot.sendMessage(chatId, msgText);
+    if (data === 'single_inc') {
+        userStates[chatId].action = 'single_increase';
+        userStates[chatId].step = 'waiting_value';
+        bot.sendMessage(chatId, "📈 اكتب نسبة الزيادة % (مثال: 10):");
+    }
+    else if (data === 'single_dec') {
+        userStates[chatId].action = 'single_decrease'; // تخفيض
+        userStates[chatId].step = 'waiting_value';
+        bot.sendMessage(chatId, "📉 اكتب نسبة الخصم % (مثال: 15):");
+    }
+    else if (data === 'single_fixed') {
+        userStates[chatId].action = 'single_fixed'; // سعر ثابت
+        userStates[chatId].step = 'waiting_value';
+        bot.sendMessage(chatId, "💰 اكتب السعر الجديد (الأساسي):");
     }
 
     // --- خيارات التصنيف ---
     else if (data.startsWith('cat_')) {
-        const [_, catId, catName] = data.split('_');
-        userStates[chatId] = { step: 'waiting_bulk_percent', target: 'category', catId: catId, catName: catName };
+        const [_, id, name] = data.split('_');
+        userStates[chatId] = { target: 'category', catId: id, catName: name };
         
-        bot.sendMessage(chatId, `📂 تصنيف: *${catName}*\n\nاختار نوع التعديل:`, {
+        bot.sendMessage(chatId, `📂 تصنيف: *${name}*\nاختر العملية:`, {
             parse_mode: 'Markdown',
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: '📈 زيادة السعر %', callback_data: 'bulk_inc' }],
-                    [{ text: '📉 تنزيل السعر %', callback_data: 'bulk_dec' }]
+                    [{ text: '📈 زيادة %', callback_data: 'bulk_cat_inc' }],
+                    [{ text: '📉 تخفيض %', callback_data: 'bulk_cat_dec' }]
                 ]
             }
         });
+    }
+    else if (data === 'bulk_cat_inc') {
+        userStates[chatId].action = 'bulk_increase';
+        userStates[chatId].step = 'waiting_value';
+        bot.sendMessage(chatId, "📈 اكتب نسبة الزيادة % للتصنيف:");
+    }
+    else if (data === 'bulk_cat_dec') {
+        userStates[chatId].action = 'bulk_decrease';
+        userStates[chatId].step = 'waiting_value';
+        bot.sendMessage(chatId, "📉 اكتب نسبة التخفيض % للتصنيف:");
     }
 
     // --- خيارات الكل ---
-    else if (data === 'all_products_confirm') {
-        userStates[chatId] = { step: 'waiting_bulk_percent', target: 'all' };
-        bot.sendMessage(chatId, `🌍 *تعديل شامل لكل المنتجات*\n\nاختار نوع التعديل:`, {
-            parse_mode: 'Markdown',
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: '📈 زيادة السعر %', callback_data: 'bulk_inc' }],
-                    [{ text: '📉 تنزيل السعر %', callback_data: 'bulk_dec' }]
-                ]
-            }
-        });
+    else if (data === 'bulk_all_inc') {
+        userStates[chatId] = { target: 'all', action: 'bulk_increase', step: 'waiting_value' };
+        bot.sendMessage(chatId, "🌍 اكتب نسبة الزيادة % لكل المنتجات:");
     }
-
-    // --- تحديد نوع العملية للجملة (زيادة/نقصان) ---
-    else if (data === 'bulk_inc' || data === 'bulk_dec') {
-        if (!userStates[chatId]) return;
-        userStates[chatId].bulkType = data; // bulk_inc or bulk_dec
-        bot.sendMessage(chatId, "🔢 اكتب النسبة المئوية الآن (مثال: 10):");
+    else if (data === 'bulk_all_dec') {
+        userStates[chatId] = { target: 'all', action: 'bulk_decrease', step: 'waiting_value' };
+        bot.sendMessage(chatId, "🌍 اكتب نسبة التخفيض % لكل المنتجات:");
     }
 
     bot.answerCallbackQuery(query.id);
 });
 
 // ==========================================
-// الدوال المساعدة (Logic Helpers)
+// 🧠 المنطق والدوال (Logic)
 // ==========================================
 
-// 1. معالجة رابط منتج واحد
+// 1. معالجة الرابط
 async function processProductLink(chatId, text) {
-    bot.sendMessage(chatId, "🔎 جاري البحث...");
+    bot.sendMessage(chatId, "🔎...");
     try {
         let cleanUrl = decodeURIComponent(text.split('?')[0]);
         if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
         const slug = cleanUrl.split('/').pop();
-        const response = await api.get("products", { slug: slug });
+        const res = await api.get("products", { slug: slug });
 
-        if (response.data.length > 0) {
-            const product = response.data[0];
-            // حفظ المنتج في الذاكرة
-            userStates[chatId].productId = product.id;
-            userStates[chatId].productPrice = product.regular_price || product.price;
-            userStates[chatId].productType = product.type;
+        if (res.data.length > 0) {
+            const p = res.data[0];
+            userStates[chatId].productId = p.id;
+            userStates[chatId].regularPrice = parseFloat(p.regular_price || p.price);
+            userStates[chatId].productType = p.type;
 
-            bot.sendMessage(chatId, `✅ *${product.name}*\n💰 السعر الحالي: ${userStates[chatId].productPrice}\n\n👇 اختر العملية:`, {
+            const caption = `✅ *${p.name}*\n💰 أساسي: ${p.regular_price}\n🏷️ بيع: ${p.sale_price || 'لا يوجد'}\n\n👇 اختر العملية:`;
+            
+            bot.sendMessage(chatId, caption, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [
-                        [{ text: '1- زيادة في السعر %', callback_data: 'opt_increase' }],
-                        [{ text: '2- تنزيل السعر %', callback_data: 'opt_decrease' }],
-                        [{ text: '3- تعديل قيمة السعر', callback_data: 'opt_fixed' }]
+                        [{ text: '📈 زيادة %', callback_data: 'single_inc' }, { text: '📉 تنزيل %', callback_data: 'single_dec' }],
+                        [{ text: '💰 تعديل قيمة السعر (أساسي)', callback_data: 'single_fixed' }]
                     ]
                 }
             });
-        } else {
-            bot.sendMessage(chatId, "❌ المنتج غير موجود.");
-            showMainMenu(chatId);
-        }
+        } else { bot.sendMessage(chatId, "❌ غير موجود."); }
     } catch (e) { bot.sendMessage(chatId, "❌ خطأ."); }
 }
 
-// 2. تنفيذ تحديث منتج واحد
-async function processProductUpdate(chatId, text) {
-    const value = parseFloat(text);
-    if (isNaN(value)) { bot.sendMessage(chatId, "❌ رقم غير صحيح."); return; }
+// 2. معالجة القيم وتنفيذ المعادلات
+async function processValueInput(chatId, text) {
+    const val = parseFloat(text);
+    if (isNaN(val)) { bot.sendMessage(chatId, "❌ رقم غير صحيح."); return; }
 
     const state = userStates[chatId];
-    let newPrice = 0;
-    let oldPrice = parseFloat(state.productPrice);
-
-    if (state.actionType === 'opt_fixed') {
-        newPrice = value;
-    } else if (state.actionType === 'opt_increase') {
-        newPrice = oldPrice + (oldPrice * (value / 100));
-    } else if (state.actionType === 'opt_decrease') {
-        newPrice = oldPrice - (oldPrice * (value / 100));
-    }
-
-    newPrice = Math.round(newPrice); // تقريب الرقم
-
-    // استخدام دالة التحديث القوية بتاعتنا
-    await updateProductSmart(chatId, { id: state.productId, type: state.productType }, { regular_price: String(newPrice), sale_price: "" });
     
-    // رجوع للقائمة
-    userStates[chatId] = { step: 'idle' };
-    setTimeout(() => showMainMenu(chatId), 3000);
-}
-
-// 3. تنفيذ التحديث الجماعي (تصنيف أو كل)
-async function processBulkUpdate(chatId, text) {
-    const percent = parseFloat(text);
-    if (isNaN(percent)) { bot.sendMessage(chatId, "❌ نسبة غير صحيحة."); return; }
-
-    const state = userStates[chatId];
-    bot.sendMessage(chatId, "🚀 جاري بدء التحديث الجماعي.. العملية قد تستغرق وقتاً، سأبلغك عند الانتهاء.");
-
-    try {
-        let page = 1;
-        let productsUpdated = 0;
+    // --- أ) تعديل منتج واحد ---
+    if (state.productId) {
+        let updateData = {};
         
-        while (true) {
-            let params = { per_page: 20, page: page, status: 'publish' };
-            if (state.target === 'category') params.category = state.catId;
-
-            const res = await api.get("products", params);
-            if (res.data.length === 0) break; // خلصنا
-
-            // Loop على المنتجات
-            for (const product of res.data) {
-                let oldPrice = parseFloat(product.regular_price || product.price);
-                if (!oldPrice) continue;
-
-                let newPrice = 0;
-                if (state.bulkType === 'bulk_inc') newPrice = oldPrice + (oldPrice * (percent / 100));
-                else newPrice = oldPrice - (oldPrice * (percent / 100));
-                
-                newPrice = Math.round(newPrice);
-
-                // تحديث صامت (بدون رسائل لكل منتج)
-                await updateProductSmart(null, { id: product.id, type: product.type }, { regular_price: String(newPrice), sale_price: "" });
-                productsUpdated++;
-            }
-            page++;
+        // 1. زيادة السعر (تغيير الأساسي ومسح الخصم)
+        if (state.action === 'single_increase') {
+            const newRegular = Math.round(state.regularPrice * (1 + val / 100));
+            updateData = { 
+                regular_price: String(newRegular), 
+                sale_price: "",
+                date_on_sale_from: null, date_on_sale_to: null 
+            };
+            bot.sendMessage(chatId, `📈 تم رفع السعر الأساسي إلى: ${newRegular}`);
         }
         
-        bot.sendMessage(chatId, `✅ *تم الانتهاء!* تم تحديث أسعار ${productsUpdated} منتج بنجاح.`, {parse_mode: 'Markdown'});
-        showMainMenu(chatId);
+        // 2. تنزيل السعر (عمل خصم - الحفاظ على الأساسي ووضع Sale Price)
+        else if (state.action === 'single_decrease') {
+            const newSale = Math.round(state.regularPrice * (1 - val / 100));
+            updateData = { 
+                regular_price: String(state.regularPrice), // الأساسي كما هو
+                sale_price: String(newSale), // سعر البيع الجديد
+                date_on_sale_from: null, date_on_sale_to: null
+            };
+            bot.sendMessage(chatId, `🏷️ تم عمل خصم! السعر الجديد: ${newSale} (مشطوب على ${state.regularPrice})`);
+        }
+        
+        // 3. سعر ثابت (تغيير الأساسي ومسح الخصم)
+        else if (state.action === 'single_fixed') {
+            updateData = { 
+                regular_price: String(val), 
+                sale_price: "",
+                date_on_sale_from: null, date_on_sale_to: null
+            };
+            bot.sendMessage(chatId, `💰 تم تثبيت السعر الأساسي: ${val}`);
+        }
 
-    } catch (e) {
-        bot.sendMessage(chatId, "❌ حدث خطأ أثناء التحديث الجماعي.");
+        await updateProductSmart(chatId, { id: state.productId, type: state.productType }, updateData);
     }
-    userStates[chatId] = { step: 'idle' };
+
+    // --- ب) تعديل جماعي (Bulk) ---
+    else if (state.target) {
+        processBulkUpdate(chatId, state, val);
+    }
+
+    userStates[chatId] = { step: 'idle' }; // Reset
+    setTimeout(() => showMainMenu(chatId), 2000);
 }
 
-// 4. إرسال الإيميل
-async function sendSupportEmail(chatId, msgText, userName) {
-    bot.sendMessage(chatId, "⏳ جاري إرسال الطلب للإيميل...");
+// 3. التحديث الجماعي
+async function processBulkUpdate(chatId, state, percent) {
+    bot.sendMessage(chatId, "🚀 جاري المعالجة الجماعية... (قد يستغرق وقتاً)");
     
-    const mailOptions = {
-        from: 'influencetargetingmarketing3@gmail.com',
-        to: ADMIN_EMAIL,
-        subject: `طلب جديد من البوت - ${userName}`,
-        text: `رسالة من المستخدم (ID: ${chatId}):\n\n${msgText}`
-    };
+    let page = 1;
+    let count = 0;
 
-    try {
-        await transporter.sendMail(mailOptions);
-        bot.sendMessage(chatId, "✅ تم إرسال طلبك للإدارة بنجاح.");
-    } catch (error) {
-        console.error(error);
-        bot.sendMessage(chatId, "❌ فشل إرسال الإيميل (تأكد من إعدادات App Password).");
+    while (true) {
+        let params = { per_page: 20, page: page, status: 'publish' };
+        if (state.target === 'category') params.category = state.catId;
+
+        const res = await api.get("products", params);
+        if (res.data.length === 0) break;
+
+        for (const p of res.data) {
+            let oldReg = parseFloat(p.regular_price || p.price);
+            if (!oldReg) continue;
+
+            let updateData = {};
+
+            // زيادة: نرفع الأساسي ونشيل الخصم
+            if (state.action === 'bulk_increase') {
+                const newReg = Math.round(oldReg * (1 + percent / 100));
+                updateData = { regular_price: String(newReg), sale_price: "" };
+            }
+            // تخفيض: نسيب الأساسي ونحط Sale Price
+            else if (state.action === 'bulk_decrease') {
+                const newSale = Math.round(oldReg * (1 - percent / 100));
+                updateData = { regular_price: String(oldReg), sale_price: String(newSale) };
+            }
+
+            // التنفيذ الصامت
+            await updateProductSmart(null, { id: p.id, type: p.type }, updateData);
+            count++;
+        }
+        page++;
     }
-    showMainMenu(chatId);
+    bot.sendMessage(chatId, `✅ تم تحديث ${count} منتج بنجاح.`);
 }
 
-// دالة التحديث الأساسية (نفس القديمة القوية)
+// 4. الدالة الذكية للتحديث
 async function updateProductSmart(chatId, productState, data) {
     try {
         let parentData = { ...data };
+        
+        // لو متغير، بنشيل السعر من الأب
         if (productState.type === 'variable') {
             delete parentData.regular_price;
             delete parentData.sale_price;
@@ -353,17 +352,37 @@ async function updateProductSmart(chatId, productState, data) {
         }
 
         if (productState.type === 'variable') {
-            const variations = await api.get(`products/${productState.id}/variations`, { per_page: 50 });
-            if (variations.data.length > 0) {
-                const promises = variations.data.map(v => api.put(`products/${productState.id}/variations/${v.id}`, data));
+            const vars = await api.get(`products/${productState.id}/variations`, { per_page: 50 });
+            if (vars.data.length > 0) {
+                // نحدث كل نسخة
+                const promises = vars.data.map(v => api.put(`products/${productState.id}/variations/${v.id}`, data));
                 await Promise.all(promises);
             }
         }
         
-        // إبلاغ المستخدم (فقط لو فيه ChatId)
+        // إجبار التحديث للواجهة
+        await api.put(`products/${productState.id}`, { status: 'publish' });
+
         if (chatId) bot.sendMessage(chatId, `✅ تم التحديث.`);
 
     } catch (e) { if(chatId) bot.sendMessage(chatId, "❌ خطأ."); }
 }
 
-bot.on('polling_error', (err) => { if (err.code !== 'EFATAL') console.log('Network Error'); });
+// 5. إرسال الإيميل
+async function sendEmail(chatId, message, user) {
+    try {
+        await transporter.sendMail({
+            from: ADMIN_EMAIL,
+            to: ADMIN_EMAIL,
+            subject: `طلب جديد من: ${user}`,
+            text: `الرسالة:\n${message}\n\nTelegram ID: ${chatId}`
+        });
+        bot.sendMessage(chatId, "✅ تم إرسال طلبك للإدارة بنجاح.");
+    } catch (e) { 
+        console.error(e);
+        bot.sendMessage(chatId, "❌ فشل إرسال الإيميل."); 
+    }
+    showMainMenu(chatId);
+}
+
+bot.on('polling_error', (err) => { if (err.code !== 'EFATAL') console.log('Polling Error'); });
