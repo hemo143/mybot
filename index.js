@@ -14,30 +14,33 @@ const api = new WooCommerceRestApi({
   consumerSecret: "cs_5f422a1e9fa95e7545c65403b702a59f7a8efc67",
   version: "wc/v3",
   queryStringAuth: true,
-  timeout: 20000 // زمن انتظار أطول للمنتجات المتغيرة
+  timeout: 60000 // زمن انتظار دقيقة كاملة (عشان المنتجات التقيلة)
 });
 
 // ==========================================
-// 🛑 خريطة الأقسام (تأكد من الأرقام)
+// 🛑 خريطة الأقسام (عدل الأرقام دي من موقعك)
 // ==========================================
 const CATEGORY_MAP = [
-    { name: '❄️ تلاجات', id: 101 },
+    { name: '❄️ تلاجات', id: 101 },  
     { name: '📺 شاشات', id: 102 },
     { name: '🧺 غسالات', id: 103 },
     { name: '🔥 بوتاجازات', id: 104 }
 ];
 
-// تشغيل السيرفر
+// ==========================================
+// تشغيل السيرفر والبوت
+// ==========================================
 const bot = new TelegramBot(token, {polling: true});
 const userStates = {}; 
-app.get('/', (req, res) => res.send('Bot is running (Variable Product Support Added)'));
+
+app.get('/', (req, res) => res.send('Bot is running with Variable Fix 2.0'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running`));
 
-console.log('✅ البوت (النسخة المتغيرة) جاهز...');
+console.log('✅ البوت جاهز...');
 
 // ==========================================
-// 2. منطق البوت
+// منطق البوت
 // ==========================================
 
 bot.on('message', async (msg) => {
@@ -47,7 +50,7 @@ bot.on('message', async (msg) => {
     if (!text) return;
 
     if (text === '/start') {
-        bot.sendMessage(chatId, "👋 أهلاً بك! أرسل رابط المنتج للتحكم فيه (يدعم المنتجات المتغيرة).");
+        bot.sendMessage(chatId, "👋 أهلاً بك! أرسل رابط المنتج للتحكم فيه.");
         return;
     }
 
@@ -66,14 +69,14 @@ bot.on('message', async (msg) => {
                 const product = response.data[0];
                 const catName = product.categories.length > 0 ? product.categories[0].name : 'بدون قسم';
                 
-                // تحديد نوع المنتج (بسيط أم متغير)
-                const typeEmoji = product.type === 'variable' ? '🔀 منتج متغير' : '📦 منتج بسيط';
+                // تحديد نوع المنتج
+                const typeEmoji = product.type === 'variable' ? '🔀 متغير' : '📦 بسيط';
 
                 userStates[chatId] = { 
                     id: product.id, 
                     name: product.name, 
                     price: product.price, 
-                    type: product.type, // حفظ النوع
+                    type: product.type, // مهم جداً
                     step: 'idle' 
                 };
 
@@ -96,11 +99,11 @@ bot.on('message', async (msg) => {
             }
         } catch (error) {
             console.error(error);
-            bot.sendMessage(chatId, "❌ خطأ في الاتصال.");
+            bot.sendMessage(chatId, "❌ خطأ اتصال.");
         }
     }
 
-    // --- استقبال المدخلات ---
+    // --- استقبال الأرقام والنصوص ---
     if (userStates[chatId] && userStates[chatId].step !== 'idle') {
         const state = userStates[chatId];
         const input = text; 
@@ -123,6 +126,7 @@ bot.on('message', async (msg) => {
             }
         }
         else if (state.step === 'awaiting_name') {
+            // الاسم عادي يتغير للأب
             await api.put(`products/${state.id}`, { name: input });
             bot.sendMessage(chatId, `📝 تم تعديل الاسم.`);
         }
@@ -140,7 +144,7 @@ bot.on('callback_query', async (query) => {
 
     if (action === 'change_category') {
         const catButtons = CATEGORY_MAP.map(cat => [{ text: cat.name, callback_data: `set_cat_${cat.id}` }]);
-        bot.sendMessage(chatId, "📂 *اختار القسم الجديد:*", { parse_mode: 'Markdown', reply_markup: { inline_keyboard: catButtons } });
+        bot.sendMessage(chatId, "📂 *اختار القسم:*", { parse_mode: 'Markdown', reply_markup: { inline_keyboard: catButtons } });
     }
     else if (action.startsWith('set_cat_')) {
         const newCatId = action.split('_')[2];
@@ -148,7 +152,7 @@ bot.on('callback_query', async (query) => {
         try {
             await api.put(`products/${userStates[chatId].id}`, { categories: [ { id: parseInt(newCatId) } ] });
             bot.sendMessage(chatId, "✅ تم النقل.");
-        } catch (e) { bot.sendMessage(chatId, "❌ فشل النقل."); }
+        } catch (e) { bot.sendMessage(chatId, "❌ فشل."); }
     }
     else if (action === 'edit_price') {
         userStates[chatId].step = 'awaiting_price';
@@ -160,14 +164,14 @@ bot.on('callback_query', async (query) => {
     }
     else if (action === 'edit_name') {
         userStates[chatId].step = 'awaiting_name';
-        bot.sendMessage(chatId, "✏️ اكتب الاسم الجديد:");
+        bot.sendMessage(chatId, "✏️ اكتب الاسم:");
     }
     else if (action === 'toggle_stock') {
         bot.sendMessage(chatId, "⏳ جاري التغيير...");
         try {
             const current = await api.get(`products/${userStates[chatId].id}`);
             const newStatus = current.data.stock_status === 'instock' ? 'outofstock' : 'instock';
-            await updateProductSmart(chatId, userStates[chatId], { stock_status: newStatus }, true); // true = stock update
+            await updateProductSmart(chatId, userStates[chatId], { stock_status: newStatus }, true);
         } catch (e) { bot.sendMessage(chatId, "❌ خطأ."); }
     }
     else if (action === 'cancel') {
@@ -178,42 +182,53 @@ bot.on('callback_query', async (query) => {
 });
 
 // ==========================================
-// 🔥 الدالة الذكية (تحديث المتغير والبسيط)
+// 🔥 الدالة الذكية (المصححة) 🔥
 // ==========================================
 async function updateProductSmart(chatId, productState, data, isStock = false) {
     try {
-        bot.sendMessage(chatId, "⏳ جاري التحديث (قد يستغرق وقتاً للمنتجات المتغيرة)...");
+        bot.sendMessage(chatId, "⏳ جاري التنفيذ...");
 
-        // 1. تحديث المنتج الرئيسي (الأب)
-        await api.put(`products/${productState.id}`, data);
+        // 1. تجهيز البيانات للأب (Parent)
+        // لو المنتج متغير، بنعمل نسخة من البيانات ونشيل منها السعر
+        // عشان الأب مبيقبلش السعر
+        let parentData = { ...data };
+        if (productState.type === 'variable' && !isStock) {
+            delete parentData.regular_price;
+            delete parentData.sale_price;
+        }
 
-        // 2. لو المنتج "متغير" (Variable)، لازم نحدث ولاده كلهم
+        // 2. تحديث الأب (لو فيه داتا باقية زي الاسم أو المخزون)
+        if (Object.keys(parentData).length > 0) {
+            await api.put(`products/${productState.id}`, parentData);
+        }
+
+        // 3. لو المنتج "متغير"، نحدث الأبناء بالسعر
         if (productState.type === 'variable') {
-            // جلب كل النسخ (Variations)
-            const variations = await api.get(`products/${productState.id}/variations`, { per_page: 100 });
+            const variations = await api.get(`products/${productState.id}/variations`, { per_page: 50 });
             
             if (variations.data.length > 0) {
                 const promises = variations.data.map(v => {
                     return api.put(`products/${productState.id}/variations/${v.id}`, data);
                 });
-                // تنفيذ التحديث للكل في نفس الوقت
                 await Promise.all(promises);
-                bot.sendMessage(chatId, `🔄 تم تحديث ${variations.data.length} نسخة فرعية للمنتج.`);
+                bot.sendMessage(chatId, `🔄 تم تحديث ${variations.data.length} لون/نوع داخل المنتج.`);
+            } else {
+                bot.sendMessage(chatId, `⚠️ المنتج متغير بس ملهوش نسخ فرعية!`);
             }
         }
 
-        // رسالة النجاح النهائية
+        // رسالة الختام
         if (isStock) {
-             bot.sendMessage(chatId, `✅ تم تغيير حالة المخزون بنجاح.`);
+             bot.sendMessage(chatId, `✅ تم تغيير حالة المخزون.`);
         } else if (data.regular_price) {
              bot.sendMessage(chatId, `✅ تم تغيير السعر إلى ${data.regular_price} بنجاح.`);
         } else {
-             bot.sendMessage(chatId, `✅ تم التحديث بنجاح.`);
+             bot.sendMessage(chatId, `✅ تم.`);
         }
 
     } catch (error) {
-        console.error(error);
-        bot.sendMessage(chatId, "❌ حدث خطأ أثناء التحديث.");
+        console.error(error.response ? error.response.data : error);
+        bot.sendMessage(chatId, `❌ حدث خطأ: ${error.message}`);
     }
 }
 
