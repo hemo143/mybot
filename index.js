@@ -30,7 +30,7 @@ const CATEGORY_MAP = [
 // تشغيل السيرفر
 const bot = new TelegramBot(token, {polling: true});
 const userStates = {}; 
-app.get('/', (req, res) => res.send('Bot is running with String Fix'));
+app.get('/', (req, res) => res.send('Bot is running with Verification Logic'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running`));
 
@@ -65,7 +65,6 @@ bot.on('message', async (msg) => {
             if (response.data.length > 0) {
                 const product = response.data[0];
                 const catName = product.categories.length > 0 ? product.categories[0].name : 'بدون قسم';
-                
                 const typeEmoji = product.type === 'variable' ? '🔀 متغير' : '📦 بسيط';
 
                 userStates[chatId] = { 
@@ -104,11 +103,9 @@ bot.on('message', async (msg) => {
         const state = userStates[chatId];
         const input = text; 
 
-        // 1. تعديل السعر المباشر
         if (state.step === 'awaiting_price') {
             const price = toEnglish(input);
             if (!isNaN(price)) {
-                // التصحيح هنا: تحويل الرقم لنص (.toString)
                 await updateProductSmart(chatId, state, { 
                     regular_price: price.toString(), 
                     sale_price: "" 
@@ -117,21 +114,18 @@ bot.on('message', async (msg) => {
                 bot.sendMessage(chatId, "❌ رقم غير صحيح.");
             }
         }
-        // 2. خصم نسبة
         else if (state.step === 'awaiting_discount') {
             const percent = toEnglish(input);
             if (!isNaN(percent)) {
                 const oldPrice = parseFloat(state.price);
                 const discountAmount = oldPrice * (percent / 100);
                 const newPrice = Math.round(oldPrice - discountAmount);
-                // التصحيح هنا أيضاً
                 await updateProductSmart(chatId, state, { 
                     regular_price: oldPrice.toString(), 
                     sale_price: newPrice.toString() 
                 });
             }
         }
-        // 3. تعديل الاسم
         else if (state.step === 'awaiting_name') {
             await api.put(`products/${state.id}`, { name: input });
             bot.sendMessage(chatId, `📝 تم تعديل الاسم.`);
@@ -188,50 +182,61 @@ bot.on('callback_query', async (query) => {
 });
 
 // ==========================================
-// 🔥 دالة التحديث (تحل مشاكل 400 و invalid_param)
+// 🔥 دالة التحديث مع الفحص الذاتي (Double Check)
 // ==========================================
 async function updateProductSmart(chatId, productState, data, isStock = false) {
     try {
-        bot.sendMessage(chatId, "⏳ جاري التنفيذ...");
+        bot.sendMessage(chatId, "⏳ جاري التنفيذ والتحقق...");
 
-        // 1. تجهيز البيانات للأب (Simple or Variable Parent)
+        // 1. تحديث المنتج
         let parentData = { ...data };
-        
-        // لو متغير ومش بنعدل مخزون، شيل السعر من الأب عشان ميزعلش
         if (productState.type === 'variable' && !isStock) {
             delete parentData.regular_price;
             delete parentData.sale_price;
         }
 
-        // تحديث المنتج الرئيسي
         if (Object.keys(parentData).length > 0) {
             await api.put(`products/${productState.id}`, parentData);
         }
 
-        // 2. لو متغير، نحدث النسخ
         if (productState.type === 'variable') {
             const variations = await api.get(`products/${productState.id}/variations`, { per_page: 50 });
             if (variations.data.length > 0) {
                 const promises = variations.data.map(v => api.put(`products/${productState.id}/variations/${v.id}`, data));
                 await Promise.all(promises);
-                bot.sendMessage(chatId, `🔄 تم تحديث النسخ.`);
             }
         }
 
-        // رسالة النجاح
+        // =====================================
+        // 🕵️‍♂️ خطوة التحقق (الجديدة)
+        // =====================================
+        
+        // ننتظر ثانية واحدة عشان الداتا بيز تحدث نفسها
+        await new Promise(r => setTimeout(r, 1000));
+
+        // نسأل الموقع: السعر كام دلوقتي؟
+        const check = await api.get(`products/${productState.id}`);
+        const currentPriceOnServer = check.data.price;
+        const currentStock = check.data.stock_status;
+
+        // مقارنة النتائج
         if (isStock) {
-             bot.sendMessage(chatId, `✅ تم تغيير حالة المخزون.`);
-        } else if (data.regular_price) {
-             bot.sendMessage(chatId, `✅ تم تغيير السعر إلى ${data.regular_price} بنجاح.`);
+             const statusText = currentStock === 'instock' ? 'متاح 🟢' : 'نفذ 🔴';
+             bot.sendMessage(chatId, `✅ تم التأكيد! المخزون الآن: ${statusText}`);
+        } 
+        else if (data.regular_price) {
+             if (parseInt(currentPriceOnServer) == parseInt(data.regular_price)) {
+                 bot.sendMessage(chatId, `✅ *تم التأكيد!* السعر في النظام أصبح: ${currentPriceOnServer} ج.م\n(لو ظاهر قدامك سعر قديم، ده كاش المتصفح - امسحه).`, {parse_mode: 'Markdown'});
+             } else {
+                 bot.sendMessage(chatId, `⚠️ *تنبيه:* أنا بعت الأمر، بس السعر في النظام لسه ${currentPriceOnServer}!\n(ممكن يكون المنتج ده عليه عرض Sale Date شغال).`, {parse_mode: 'Markdown'});
+             }
         } else {
              bot.sendMessage(chatId, `✅ تم.`);
         }
 
     } catch (error) {
-        // طباعة تفاصيل الخطأ عشان لو حصل تاني نعرف السبب
-        const errorMsg = error.response ? JSON.stringify(error.response.data) : error.message;
-        console.error("Update Error:", errorMsg);
-        bot.sendMessage(chatId, `❌ حدث خطأ: ${error.response ? error.response.status : ''}`);
+        console.error("Update Error:", error.response ? error.response.data : error.message);
+        bot.sendMessage(chatId, `❌ حدث خطأ تقني.`);
     }
 }
 
