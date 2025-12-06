@@ -29,14 +29,14 @@ const ADMIN_EMAIL = 'influencetargetingmarketing3@gmail.com';
 
 const bot = new TelegramBot(token, {polling: true});
 const userStates = {}; 
-app.get('/', (req, res) => res.send('Bot V7 (POST Batch Fix) Running...'));
+app.get('/', (req, res) => res.send('Bot V9 (Smart Steps) Running...'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running`));
 
-console.log('✅ البوت جاهز (وضع تخطي الحظر)...');
+console.log('✅ البوت جاهز V9...');
 
 // ==========================================
-// القوائم والتشغيل
+// القوائم
 // ==========================================
 function showMainMenu(chatId) {
     const opts = {
@@ -66,7 +66,7 @@ bot.on('message', async (msg) => {
 
     if (text === '📦 تعديل سعر منتج') {
         userStates[chatId] = { step: 'waiting_product_link' };
-        bot.sendMessage(chatId, "🔗 هات الرابط:", { reply_markup: { remove_keyboard: true }});
+        bot.sendMessage(chatId, "🔗 الرابط:", { reply_markup: { remove_keyboard: true }});
     }
     else if (text === '📂 تعديل تصنيف كامل') {
         bot.sendMessage(chatId, "⏳ لحظة...");
@@ -77,8 +77,7 @@ bot.on('message', async (msg) => {
         } catch (e) { bot.sendMessage(chatId, "❌ خطأ."); }
     }
     else if (text === '🌍 تعديل شامل') {
-        bot.sendMessage(chatId, "⚠️ تحذير: تعديل كل الموقع.\nاختر:", {
-            parse_mode: 'Markdown',
+        bot.sendMessage(chatId, "⚠️ تحذير: الكل.\nاختر:", {
             reply_markup: {
                 inline_keyboard: [
                     [{ text: '📈 زيادة %', callback_data: 'bulk_all_inc' }],
@@ -95,27 +94,27 @@ bot.on('message', async (msg) => {
         const state = userStates[chatId];
         if (state.step === 'waiting_product_link') {
             if (text.includes('http')) processProductLink(chatId, text);
-            else bot.sendMessage(chatId, "❌ رابط غلط.");
+            else bot.sendMessage(chatId, "❌ رابط خطأ.");
         }
         else if (state.step === 'waiting_value') processValueInput(chatId, text);
         else if (state.step === 'waiting_support_msg') sendEmail(chatId, text, msg.from.first_name);
     }
 });
 
+// معالجة الأزرار
 bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
     const data = query.data;
 
-    // أزرار المنتج
     if (data === 'single_fixed') {
         userStates[chatId].action = 'single_fixed';
         userStates[chatId].step = 'waiting_value';
-        bot.sendMessage(chatId, "💵 اكتب السعر الأساسي الجديد (Regular):");
+        bot.sendMessage(chatId, "💵 اكتب السعر الأساسي الجديد (بدون شطب):");
     }
     else if (data === 'single_sale') {
         userStates[chatId].action = 'single_sale';
         userStates[chatId].step = 'waiting_value';
-        bot.sendMessage(chatId, "🏷️ اكتب سعر الخصم (Sale):");
+        bot.sendMessage(chatId, "🏷️ اكتب سعر الخصم (عشان يظهر الشطب):");
     }
     else if (data === 'single_inc') {
         userStates[chatId].action = 'single_increase';
@@ -127,7 +126,6 @@ bot.on('callback_query', async (query) => {
         userStates[chatId].step = 'waiting_value';
         bot.sendMessage(chatId, "📉 نسبة الخصم %:");
     }
-    // أزرار التصنيف
     else if (data.startsWith('cat_')) {
         const [_, id, name] = data.split('_');
         userStates[chatId] = { target: 'category', catId: id, catName: name };
@@ -140,31 +138,19 @@ bot.on('callback_query', async (query) => {
             }
         });
     }
-    else if (data === 'bulk_cat_inc') {
-        userStates[chatId].action = 'bulk_increase';
+    else if (['bulk_cat_inc','bulk_cat_dec','bulk_all_inc','bulk_all_dec'].includes(data)){
+        userStates[chatId].action = data.replace('bulk_cat', 'bulk').replace('bulk_all', 'bulk');
+        if(data.includes('cat')) userStates[chatId].target = 'category';
+        else userStates[chatId].target = 'all';
         userStates[chatId].step = 'waiting_value';
-        bot.sendMessage(chatId, "📈 نسبة الزيادة %:");
-    }
-    else if (data === 'bulk_cat_dec') {
-        userStates[chatId].action = 'bulk_decrease';
-        userStates[chatId].step = 'waiting_value';
-        bot.sendMessage(chatId, "📉 نسبة التخفيض %:");
-    }
-    // أزرار الكل
-    else if (data === 'bulk_all_inc') {
-        userStates[chatId] = { target: 'all', action: 'bulk_increase', step: 'waiting_value' };
-        bot.sendMessage(chatId, "🌍 نسبة الزيادة % للكل:");
-    }
-    else if (data === 'bulk_all_dec') {
-        userStates[chatId] = { target: 'all', action: 'bulk_decrease', step: 'waiting_value' };
-        bot.sendMessage(chatId, "🌍 نسبة التخفيض % للكل:");
+        bot.sendMessage(chatId, "🔢 اكتب النسبة %:");
     }
 
     bot.answerCallbackQuery(query.id);
 });
 
 // ==========================================
-// 🛠️ المعالجة
+// 🛠️ المعالجة (الذكية)
 // ==========================================
 
 async function processProductLink(chatId, text) {
@@ -181,12 +167,13 @@ async function processProductLink(chatId, text) {
             userStates[chatId].regularPrice = parseFloat(p.regular_price || p.price);
             userStates[chatId].productType = p.type;
 
-            const caption = `✅ *${p.name}*\n💰 السعر: ${p.price}\n👇 اختر:`;
+            const caption = `✅ *${p.name}*\n💵 الأساسي: ${p.regular_price || '-'}\n🏷️ الخصم: ${p.sale_price || '-'}\n👇 اختر:`;
             bot.sendMessage(chatId, caption, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [
-                        [ { text: '💵 سعر أساسي', callback_data: 'single_fixed' }, { text: '🏷️ سعر خصم', callback_data: 'single_sale' } ],
+                        [ { text: '💵 سعر أساسي (مسح الخصم)', callback_data: 'single_fixed' } ],
+                        [ { text: '🏷️ سعر خصم (إبقاء الشطب)', callback_data: 'single_sale' } ],
                         [ { text: '📈 زيادة %', callback_data: 'single_inc' }, { text: '📉 خصم %', callback_data: 'single_dec' } ]
                     ]
                 }
@@ -201,40 +188,49 @@ async function processValueInput(chatId, text) {
 
     const state = userStates[chatId];
     if (state.productId) {
-        let updateData = { id: state.productId }; // لازم الـ ID يكون جوا الداتا عشان الـ Batch
-
-        // حسابات الأسعار
+        
+        // 1. تثبيت السعر الأساسي (يمسح الخصم أولاً لتجنب الأخطاء)
         if (state.action === 'single_fixed') {
-            updateData.regular_price = String(val);
-            updateData.sale_price = "";
-            updateData.date_on_sale_from = ""; updateData.date_on_sale_to = "";
-            bot.sendMessage(chatId, `⏳ جاري التثبيت على: ${val}...`);
+            bot.sendMessage(chatId, `⏳ (1/2) تنظيف الخصومات...`);
+            await updateBatchStep(chatId, state, { sale_price: "", date_on_sale_from: null, date_on_sale_to: null });
+            
+            bot.sendMessage(chatId, `⏳ (2/2) وضع السعر الأساسي: ${val}...`);
+            await updateBatchStep(chatId, state, { regular_price: String(val) });
+            
+            bot.sendMessage(chatId, `✅ تم.`);
         }
+
+        // 2. وضع سعر خصم (يترك الأساسي كما هو)
         else if (state.action === 'single_sale') {
-            updateData.regular_price = String(state.regularPrice);
-            updateData.sale_price = String(val);
-            updateData.date_on_sale_from = ""; updateData.date_on_sale_to = "";
+            // تحقق بسيط
+            if (val >= state.regularPrice) {
+                bot.sendMessage(chatId, `⚠️ تنبيه: سعر الخصم (${val}) أعلى من الأساسي (${state.regularPrice})! قد لا يقبله الموقع.`);
+            }
             bot.sendMessage(chatId, `⏳ جاري وضع الخصم: ${val}...`);
+            await updateBatchStep(chatId, state, { sale_price: String(val) });
+            bot.sendMessage(chatId, `✅ تم.`);
         }
+
+        // 3. زيادة
         else if (state.action === 'single_increase') {
             const newReg = Math.round(state.regularPrice * (1 + val / 100));
-            updateData.regular_price = String(newReg);
-            updateData.sale_price = "";
-            updateData.date_on_sale_from = ""; updateData.date_on_sale_to = "";
-            bot.sendMessage(chatId, `⏳ جاري الرفع لـ: ${newReg}...`);
-        }
-        else if (state.action === 'single_decrease') {
-            const newSale = Math.round(state.regularPrice * (1 - val / 100));
-            updateData.regular_price = String(state.regularPrice);
-            updateData.sale_price = String(newSale);
-            updateData.date_on_sale_from = ""; updateData.date_on_sale_to = "";
-            bot.sendMessage(chatId, `⏳ جاري الخصم لـ: ${newSale}...`);
+            bot.sendMessage(chatId, `⏳ (1/2) تنظيف...`);
+            await updateBatchStep(chatId, state, { sale_price: "", date_on_sale_from: null, date_on_sale_to: null });
+            
+            bot.sendMessage(chatId, `⏳ (2/2) رفع السعر لـ ${newReg}...`);
+            await updateBatchStep(chatId, state, { regular_price: String(newReg) });
+            bot.sendMessage(chatId, `✅ تم.`);
         }
 
-        await updateProductSmart(chatId, state, updateData);
+        // 4. خصم
+        else if (state.action === 'single_decrease') {
+            const newSale = Math.round(state.regularPrice * (1 - val / 100));
+            bot.sendMessage(chatId, `⏳ جاري الخصم لـ ${newSale}...`);
+            await updateBatchStep(chatId, state, { sale_price: String(newSale) });
+            bot.sendMessage(chatId, `✅ تم.`);
+        }
     }
     
-    // تعديل جماعي
     else if (state.target) {
         processBulkUpdate(chatId, state, val);
     }
@@ -243,26 +239,18 @@ async function processValueInput(chatId, text) {
     setTimeout(() => showMainMenu(chatId), 2000);
 }
 
-// 🔥 دالة التحديث الجديدة (تستخدم POST Batch بدلاً من PUT)
-async function updateProductSmart(chatId, productState, data) {
+// دالة التحديث بالدفعات (Batch)
+async function updateBatchStep(chatId, productState, data) {
     try {
         let updates = [];
-
-        // 1. تحديث المنتج الأب
-        let parentData = { ...data };
+        let parentData = { ...data, id: productState.id };
+        
         if (productState.type === 'variable') {
             delete parentData.regular_price;
             delete parentData.sale_price;
         }
-        // إضافة الـ ID للبيانات (شرط أساسي للـ Batch)
-        parentData.id = productState.id;
-        
-        // لو في داتا غير الـ ID، ضيفها للتحديث
-        if (Object.keys(parentData).length > 1) {
-            updates.push(parentData);
-        }
+        if (Object.keys(parentData).length > 1) updates.push(parentData);
 
-        // 2. تحديث النسخ (لو متغير)
         if (productState.type === 'variable') {
             const vars = await api.get(`products/${productState.id}/variations`, { per_page: 50 });
             if (vars.data.length > 0) {
@@ -272,61 +260,46 @@ async function updateProductSmart(chatId, productState, data) {
             }
         }
 
-        // 🛑 السر هنا: استخدام POST products/batch بدلاً من PUT
         if (updates.length > 0) {
             await api.post("products/batch", { update: updates });
         }
-        
-        bot.sendMessage(chatId, `✅ تم التحديث بنجاح (Batch Mode).`);
 
-    } catch (e) { 
-        console.error(e.response ? e.response.data : e);
-        let msg = e.response ? `❌ خطأ من الموقع: ${e.response.data.message}` : "❌ خطأ اتصال";
-        if(chatId) bot.sendMessage(chatId, msg); 
-    }
+    } catch (e) { console.error(e); }
 }
 
 async function processBulkUpdate(chatId, state, percent) {
     bot.sendMessage(chatId, "🚀 جاري العمل...");
     let page = 1; let count = 0;
-
     while (true) {
         let params = { per_page: 20, page: page, status: 'publish' };
         if (state.target === 'category') params.category = state.catId;
-
         const res = await api.get("products", params);
         if (res.data.length === 0) break;
 
-        let batchUpdates = [];
+        if (state.action.includes('increase')) {
+            // خطوتين للزيادة
+            let cleanUpdates = res.data.map(p => ({ id: p.id, sale_price: "", date_on_sale_from: null, date_on_sale_to: null }));
+            await api.post("products/batch", { update: cleanUpdates });
 
-        for (const p of res.data) {
-            let oldReg = parseFloat(p.regular_price || p.price);
-            if (!oldReg) continue;
-
-            let updateData = { id: p.id };
-            
-            if (state.action === 'bulk_increase') {
-                const newReg = Math.round(oldReg * (1 + percent / 100));
-                updateData.regular_price = String(newReg);
-                updateData.sale_price = "";
-                updateData.date_on_sale_from = ""; updateData.date_on_sale_to = "";
+            let priceUpdates = [];
+            for (const p of res.data) {
+                let oldReg = parseFloat(p.regular_price || p.price);
+                if (!oldReg) continue;
+                priceUpdates.push({ id: p.id, regular_price: String(Math.round(oldReg * (1 + percent / 100))) });
+                count++;
             }
-            else if (state.action === 'bulk_decrease') {
-                const newSale = Math.round(oldReg * (1 - percent / 100));
-                updateData.regular_price = String(oldReg);
-                updateData.sale_price = String(newSale);
-                updateData.date_on_sale_from = ""; updateData.date_on_sale_to = "";
+            if (priceUpdates.length > 0) await api.post("products/batch", { update: priceUpdates });
+        } else {
+            // خطوة واحدة للتخفيض
+            let saleUpdates = [];
+            for (const p of res.data) {
+                let oldReg = parseFloat(p.regular_price || p.price);
+                if (!oldReg) continue;
+                saleUpdates.push({ id: p.id, sale_price: String(Math.round(oldReg * (1 - percent / 100))) });
+                count++;
             }
-            
-            batchUpdates.push(updateData);
-            count++;
+            if (saleUpdates.length > 0) await api.post("products/batch", { update: saleUpdates });
         }
-
-        // إرسال التحديثات دفعة واحدة (Batch POST)
-        if (batchUpdates.length > 0) {
-            await api.post("products/batch", { update: batchUpdates });
-        }
-        
         page++;
         await new Promise(r => setTimeout(r, 500));
     }
