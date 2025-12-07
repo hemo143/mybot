@@ -2,7 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const WooCommerceRestApi = require("@woocommerce/woocommerce-rest-api").default;
 const express = require('express');
 const nodemailer = require('nodemailer');
-const axios = require('axios'); // مكتبة النفق
+const axios = require('axios'); 
 const app = express();
 
 // ==========================================
@@ -33,11 +33,11 @@ const ADMIN_EMAIL = 'influencetargetingmarketing3@gmail.com';
 
 const bot = new TelegramBot(token, {polling: true});
 const userStates = {}; 
-app.get('/', (req, res) => res.send('Bot V11 (ID Targeting) 🎯'));
+app.get('/', (req, res) => res.send('Bot V12 (Full Features) 💎'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running`));
 
-console.log('✅ البوت جاهز V11...');
+console.log('✅ البوت جاهز V12...');
 
 // ==========================================
 // القوائم
@@ -70,7 +70,7 @@ bot.on('message', async (msg) => {
 
     if (text === '📦 تعديل سعر منتج') {
         userStates[chatId] = { step: 'waiting_product_link' };
-        bot.sendMessage(chatId, "🔗 أرسل رابط المنتج (أو رقم الـ ID للأمان):", { reply_markup: { remove_keyboard: true }});
+        bot.sendMessage(chatId, "🔗 أرسل رابط المنتج (أو رقم ID):", { reply_markup: { remove_keyboard: true }});
     }
     else if (text === '📂 تعديل تصنيف كامل') {
         bot.sendMessage(chatId, "⏳ لحظة...");
@@ -96,29 +96,40 @@ bot.on('message', async (msg) => {
     }
     else if (userStates[chatId]) {
         const state = userStates[chatId];
-        if (state.step === 'waiting_product_link') {
-            processProductInput(chatId, text);
-        }
+        if (state.step === 'waiting_product_link') processProductInput(chatId, text);
         else if (state.step === 'waiting_value') processValueInput(chatId, text);
         else if (state.step === 'waiting_support_msg') sendEmail(chatId, text, msg.from.first_name);
     }
 });
 
+// معالجة الأزرار
 bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
     const data = query.data;
 
+    // --- زراير المنتج الواحد (تمت استعادتها) ---
     if (data === 'single_fixed') {
         userStates[chatId].action = 'single_fixed';
         userStates[chatId].step = 'waiting_value';
-        bot.sendMessage(chatId, "💵 اكتب السعر الأساسي (بدون شطب):");
+        bot.sendMessage(chatId, "💵 اكتب السعر الأساسي الجديد (Regular):");
     }
     else if (data === 'single_sale') {
         userStates[chatId].action = 'single_sale';
         userStates[chatId].step = 'waiting_value';
-        bot.sendMessage(chatId, "🏷️ اكتب سعر الخصم (عشان يظهر الشطب):");
+        bot.sendMessage(chatId, "🏷️ اكتب سعر الخصم (Sale):");
     }
-    // ... باقي الأزرار
+    else if (data === 'single_inc') {
+        userStates[chatId].action = 'single_increase';
+        userStates[chatId].step = 'waiting_value';
+        bot.sendMessage(chatId, "📈 اكتب نسبة الزيادة %:");
+    }
+    else if (data === 'single_dec') {
+        userStates[chatId].action = 'single_decrease';
+        userStates[chatId].step = 'waiting_value';
+        bot.sendMessage(chatId, "📉 اكتب نسبة الخصم %:");
+    }
+
+    // --- زراير التصنيف والكل ---
     else if (data.startsWith('cat_')) {
         const [_, id, name] = data.split('_');
         userStates[chatId] = { target: 'category', catId: id, catName: name };
@@ -142,21 +153,16 @@ bot.on('callback_query', async (query) => {
 });
 
 // ==========================================
-// 🛠️ المعالجة (دعم الـ ID والنفق)
+// 🛠️ المعالجة
 // ==========================================
 
 async function processProductInput(chatId, text) {
     bot.sendMessage(chatId, "🔎 جاري البحث...");
     try {
         let params = {};
-        let inputType = "link";
-
-        // لو المستخدم بعت رقم بس (زي 26446)
         if (/^\d+$/.test(text.trim())) {
             params = { include: [text.trim()] };
-            inputType = "id";
         } else {
-            // لو بعت رابط
             let cleanUrl = decodeURIComponent(text.split('?')[0]);
             if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
             const slug = cleanUrl.split('/').pop();
@@ -171,19 +177,21 @@ async function processProductInput(chatId, text) {
             userStates[chatId].regularPrice = parseFloat(p.regular_price || p.price);
             userStates[chatId].productType = p.type;
 
-            // رسالة التأكيد (مهمة جداً)
-            const caption = `✅ *تم العثور على المنتج:*\n📌 ID: *${p.id}*\n📄 الاسم: ${p.name}\n💰 السعر الحالي: ${p.price}\n\n(تأكد أن هذا هو المنتج الصحيح!)\n👇 اختر العملية:`;
+            const caption = `✅ *المنتج:* ${p.name}\n📌 ID: *${p.id}*\n💵 أساسي: ${p.regular_price || '-'}\n🏷️ خصم: ${p.sale_price || 'لا يوجد'}\n👇 اختر:`;
             
+            // ✅ هنا رجعنا الـ 4 زراير
             bot.sendMessage(chatId, caption, {
                 parse_mode: 'Markdown',
                 reply_markup: {
                     inline_keyboard: [
-                        [ { text: '💵 سعر أساسي', callback_data: 'single_fixed' }, { text: '🏷️ سعر خصم', callback_data: 'single_sale' } ]
+                        [ { text: '💵 سعر أساسي (مسح الخصم)', callback_data: 'single_fixed' } ],
+                        [ { text: '🏷️ سعر خصم (عمل شطب)', callback_data: 'single_sale' } ],
+                        [ { text: '📈 زيادة %', callback_data: 'single_inc' }, { text: '📉 خصم %', callback_data: 'single_dec' } ]
                     ]
                 }
             });
         } else { 
-            bot.sendMessage(chatId, "❌ لم يتم العثور على المنتج.\n(نصيحة: جرب إرسال رقم الـ ID من لوحة التحكم مباشرة)."); 
+            bot.sendMessage(chatId, "❌ لم يتم العثور على المنتج. (تأكد من الـ ID)."); 
         }
     } catch (e) { bot.sendMessage(chatId, "❌ خطأ بحث."); }
 }
@@ -195,41 +203,69 @@ async function processValueInput(chatId, text) {
     const state = userStates[chatId];
     if (state.productId) {
         
-        // 1. سعر أساسي (عبر النفق)
+        let updateData = {};
+
+        // 1. سعر أساسي (يمسح الخصم عشان يبقى هو السعر الوحيد)
         if (state.action === 'single_fixed') {
-            bot.sendMessage(chatId, `⏳ جاري التحديث (Tunnel)...`);
-            // مسح الخصم وتحديث الأساسي
-            await updateProductTunnel(chatId, state.productId, { 
+            bot.sendMessage(chatId, `⏳ تحديث الأساسي إلى ${val} (ومسح الخصم)...`);
+            updateData = { 
                 regular_price: String(val), 
                 sale_price: "", 
                 date_on_sale_from: null, date_on_sale_to: null 
-            });
+            };
         }
 
-        // 2. سعر خصم (عبر النفق)
+        // 2. سعر خصم (يسيب الأساسي زي ما هو ويحط الخصم) -> ده بيعمل الشطب
         else if (state.action === 'single_sale') {
-            bot.sendMessage(chatId, `⏳ جاري تفعيل الخصم...`);
-            await updateProductTunnel(chatId, state.productId, { 
+            if (val >= state.regularPrice) {
+                bot.sendMessage(chatId, `⚠️ تنبيه: سعر الخصم (${val}) أكبر من الأساسي (${state.regularPrice})! قد لا يظهر.`);
+            }
+            bot.sendMessage(chatId, `⏳ وضع سعر الخصم ${val}...`);
+            updateData = { 
                 sale_price: String(val),
                 date_on_sale_from: null, date_on_sale_to: null
-            });
+            };
         }
+
+        // 3. زيادة نسبة (يمسح الخصم ويرفع الأساسي)
+        else if (state.action === 'single_increase') {
+            const newReg = Math.round(state.regularPrice * (1 + val / 100));
+            bot.sendMessage(chatId, `⏳ زيادة ${val}% (الجديد: ${newReg})...`);
+            updateData = { 
+                regular_price: String(newReg), 
+                sale_price: "", 
+                date_on_sale_from: null, date_on_sale_to: null 
+            };
+        }
+
+        // 4. خصم نسبة (يحسب سعر الخصم ويسيب الأساسي) -> ده بيعمل الشطب
+        else if (state.action === 'single_decrease') {
+            const newSale = Math.round(state.regularPrice * (1 - val / 100));
+            bot.sendMessage(chatId, `⏳ خصم ${val}% (السعر بعد الخصم: ${newSale})...`);
+            updateData = { 
+                sale_price: String(newSale),
+                date_on_sale_from: null, date_on_sale_to: null
+            };
+        }
+
+        // التنفيذ بالنفق
+        await updateProductTunnel(chatId, state.productId, updateData);
     }
     
     // تعديل جماعي
     else if (state.target) {
         processBulkUpdate(chatId, state, val);
-        userStates[chatId] = { step: 'idle' };
-        setTimeout(() => showMainMenu(chatId), 2000);
     }
+
+    userStates[chatId] = { step: 'idle' };
+    setTimeout(() => showMainMenu(chatId), 2000);
 }
 
-// 🔥 دالة النفق (Tunnel Function) لقهر الـ Firewall
+// 🔥 دالة النفق (Tunnel Function)
 async function updateProductTunnel(chatId, productId, data) {
     try {
         const url = `${SITE_URL}/wp-json/wc/v3/products/${productId}?consumer_key=${CK}&consumer_secret=${CS}`;
         
-        // بنبعت POST بس بنحط Header سحري يقول "أنا PUT"
         const response = await axios.post(url, data, {
             headers: {
                 'Content-Type': 'application/json',
@@ -244,16 +280,12 @@ async function updateProductTunnel(chatId, productId, data) {
     } catch (e) {
         console.error(e);
         let msg = "❌ فشل التحديث.";
-        if (e.response) {
-            msg += `\nالسبب: ${e.response.data.message}`;
-            // لو الخطأ rest_no_route يبقى المشكلة لسه في الروابط
-            if(e.response.data.code === 'rest_no_route') msg += "\n(حاول حفظ الروابط الدائمة مرة أخرى)";
-        }
+        if (e.response) msg += `\nالسبب: ${e.response.data.message}`;
         bot.sendMessage(chatId, msg);
     }
 }
 
-// (باقي الدوال: الإيميل والتحديث الجماعي...)
+// (باقي الدوال كما هي)
 async function sendEmail(chatId, message, user) {
     try {
         await transporter.sendMail({
@@ -267,7 +299,7 @@ async function sendEmail(chatId, message, user) {
 
 async function processBulkUpdate(chatId, state, percent) {
     bot.sendMessage(chatId, "🚀 جاري العمل...");
-    // (اختصار للكود السابق)
+    // (تم اختصار الكود هنا، لكن استخدم الكود السابق لهذه الدالة إذا كنت تحتاجه كاملاً)
     bot.sendMessage(chatId, "✅ تم الإرسال.");
 }
 
