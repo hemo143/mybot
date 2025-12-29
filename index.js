@@ -33,11 +33,11 @@ const ADMIN_EMAIL = 'influencetargetingmarketing3@gmail.com';
 
 const bot = new TelegramBot(token, {polling: true});
 const userStates = {}; 
-app.get('/', (req, res) => res.send('Bot V14 (Stock & Name Edit) 🚀'));
+app.get('/', (req, res) => res.send('Bot V15 (Description Added) 🚀'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running`));
 
-console.log('✅ البوت جاهز V14...');
+console.log('✅ البوت جاهز V15...');
 
 // ==========================================
 // القوائم
@@ -46,7 +46,7 @@ function showMainMenu(chatId) {
     const opts = {
         reply_markup: {
             keyboard: [
-                ['📦 تعديل منتج (سعر/مخزون/اسم)'],
+                ['📦 تعديل منتج شامل'], // اسم مختصر
                 ['📂 تعديل تصنيف كامل'],
                 ['🌍 تعديل شامل'],
                 ['📩 دعم فني']
@@ -68,7 +68,7 @@ bot.on('message', async (msg) => {
         return;
     }
 
-    if (text === '📦 تعديل منتج (سعر/مخزون/اسم)') {
+    if (text === '📦 تعديل منتج شامل') {
         userStates[chatId] = { step: 'waiting_product_link' };
         bot.sendMessage(chatId, "🔗 أرسل رابط المنتج (أو رقم ID):", { reply_markup: { remove_keyboard: true }});
     }
@@ -96,9 +96,11 @@ bot.on('message', async (msg) => {
     }
     else if (userStates[chatId]) {
         const state = userStates[chatId];
+        // توجيه المدخلات حسب الحالة
         if (state.step === 'waiting_product_link') processProductInput(chatId, text);
-        else if (state.step === 'waiting_value') processValueInput(chatId, text); // للسعر
-        else if (state.step === 'waiting_new_name') processNameInput(chatId, text); // للاسم
+        else if (state.step === 'waiting_value') processValueInput(chatId, text);
+        else if (state.step === 'waiting_new_name') processNameInput(chatId, text);
+        else if (state.step === 'waiting_new_desc') processDescriptionInput(chatId, text); // ✅ حالة الوصف الجديدة
         else if (state.step === 'waiting_support_msg') sendEmail(chatId, text, msg.from.first_name);
     }
 });
@@ -119,7 +121,7 @@ bot.on('callback_query', async (query) => {
         userStates[chatId].step = 'waiting_value';
         bot.sendMessage(chatId, "🏷️ اكتب سعر الخصم:");
     }
-    // --- أزرار المخزون (جديد) ---
+    // --- أزرار المخزون ---
     else if (data === 'stock_menu') {
         bot.sendMessage(chatId, "📦 اختر حالة المخزون:", {
             reply_markup: {
@@ -136,14 +138,25 @@ bot.on('callback_query', async (query) => {
     else if (data === 'stock_outofstock') {
         await updateProductTunnel(chatId, userStates[chatId].productId, { stock_status: 'outofstock' });
     }
-    // --- زر تعديل الاسم (جديد) ---
+    // --- زر تعديل الاسم ---
     else if (data === 'edit_name') {
         userStates[chatId].step = 'waiting_new_name';
         bot.sendMessage(chatId, "✍️ اكتب الاسم الجديد للمنتج:");
     }
+    // --- زر تعديل الوصف (جديد) ---
+    else if (data === 'edit_desc') {
+        userStates[chatId].step = 'waiting_new_desc';
+        bot.sendMessage(chatId, "📝 اكتب الوصف الجديد للمنتج (Description):");
+    }
     
-    // ... باقي الأزرار (تصنيف/كل)
-    else if (data.startsWith('cat_')) {
+    // ... باقي الأزرار
+    else if (['bulk_cat_inc','bulk_cat_dec','bulk_all_inc','bulk_all_dec'].includes(data)){
+        userStates[chatId].action = data.replace('bulk_cat', 'bulk').replace('bulk_all', 'bulk');
+        if(data.includes('cat')) userStates[chatId].target = 'category';
+        else userStates[chatId].target = 'all';
+        userStates[chatId].step = 'waiting_value';
+        bot.sendMessage(chatId, "🔢 اكتب النسبة %:");
+    } else if (data.startsWith('cat_')) {
         const [_, id, name] = data.split('_');
         userStates[chatId] = { target: 'category', catId: id, catName: name };
         bot.sendMessage(chatId, `📂 تصنيف: ${name}\nاختر:`, {
@@ -154,13 +167,6 @@ bot.on('callback_query', async (query) => {
                 ]
             }
         });
-    }
-    else if (['bulk_cat_inc','bulk_cat_dec','bulk_all_inc','bulk_all_dec'].includes(data)){
-        userStates[chatId].action = data.replace('bulk_cat', 'bulk').replace('bulk_all', 'bulk');
-        if(data.includes('cat')) userStates[chatId].target = 'category';
-        else userStates[chatId].target = 'all';
-        userStates[chatId].step = 'waiting_value';
-        bot.sendMessage(chatId, "🔢 اكتب النسبة %:");
     }
 
     bot.answerCallbackQuery(query.id);
@@ -199,7 +205,8 @@ async function processProductInput(chatId, text) {
                 reply_markup: {
                     inline_keyboard: [
                         [ { text: '💵 سعر أساسي', callback_data: 'single_fixed' }, { text: '🏷️ سعر خصم', callback_data: 'single_sale' } ],
-                        [ { text: '📦 حالة المخزون', callback_data: 'stock_menu' }, { text: '✍️ تعديل الاسم', callback_data: 'edit_name' } ]
+                        [ { text: '📦 حالة المخزون', callback_data: 'stock_menu' }, { text: '✍️ تعديل الاسم', callback_data: 'edit_name' } ],
+                        [ { text: '📝 تعديل الوصف', callback_data: 'edit_desc' } ] // ✅ الزر الجديد
                     ]
                 }
             });
@@ -213,14 +220,26 @@ async function processProductInput(chatId, text) {
 async function processNameInput(chatId, text) {
     const state = userStates[chatId];
     if (state.productId) {
-        bot.sendMessage(chatId, `⏳ جاري تغيير الاسم إلى: ${text}...`);
+        bot.sendMessage(chatId, `⏳ جاري تغيير الاسم...`);
         await updateProductTunnel(chatId, state.productId, { name: text });
     }
     userStates[chatId] = { step: 'idle' };
     setTimeout(() => showMainMenu(chatId), 2000);
 }
 
-// دالة معالجة الأسعار (كما هي)
+// ✅ دالة معالجة تغيير الوصف (الجديدة)
+async function processDescriptionInput(chatId, text) {
+    const state = userStates[chatId];
+    if (state.productId) {
+        bot.sendMessage(chatId, `⏳ جاري تحديث الوصف...`);
+        // تحديث حقل description
+        await updateProductTunnel(chatId, state.productId, { description: text });
+    }
+    userStates[chatId] = { step: 'idle' };
+    setTimeout(() => showMainMenu(chatId), 2000);
+}
+
+// دالة معالجة الأسعار
 async function processValueInput(chatId, text) {
     const val = parseFloat(text);
     if (isNaN(val) && !userStates[chatId].target) { bot.sendMessage(chatId, "❌ رقم غلط."); return; }
@@ -229,7 +248,7 @@ async function processValueInput(chatId, text) {
     if (state.productId) {
         let updateData = {};
         if (state.action === 'single_fixed') {
-            bot.sendMessage(chatId, `⏳ تحديث الأساسي...`);
+            bot.sendMessage(chatId, `⏳ تحديث الأساسي (ومسح الخصم)...`);
             updateData = { regular_price: String(val), sale_price: "", date_on_sale_from: null, date_on_sale_to: null };
         }
         else if (state.action === 'single_sale') {
@@ -266,7 +285,7 @@ async function updateProductTunnel(chatId, productId, data) {
     }
 }
 
-// (باقي الدوال: الإيميل والتحديث الجماعي...)
+// (باقي الدوال كما هي)
 async function sendEmail(chatId, message, user) {
     try {
         await transporter.sendMail({
@@ -280,7 +299,6 @@ async function sendEmail(chatId, message, user) {
 
 async function processBulkUpdate(chatId, state, percent) {
     bot.sendMessage(chatId, "🚀 جاري العمل...");
-    // (تم اختصار الكود)
     bot.sendMessage(chatId, "✅ تم الإرسال.");
 }
 
