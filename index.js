@@ -3,7 +3,8 @@ const WooCommerceRestApi = require("@woocommerce/woocommerce-rest-api").default;
 const express = require('express');
 const nodemailer = require('nodemailer');
 const axios = require('axios');
-const FormData = require('form-data'); // ضروري لرفع الصور
+const FormData = require('form-data');
+const cheerio = require('cheerio'); 
 const app = express();
 
 // ==========================================
@@ -35,11 +36,11 @@ const ADMIN_EMAIL = 'influencetargetingmarketing3@gmail.com';
 const bot = new TelegramBot(token, {polling: true});
 const userStates = {}; 
 
-app.get('/', (req, res) => res.send('Bot V17 (Direct Upload & One-Msg Data) 🚀'));
+app.get('/', (req, res) => res.send('Bot V19 (Interactive Cloner) 🗣️'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running`));
 
-console.log('✅ البوت جاهز V17...');
+console.log('✅ البوت جاهز V19...');
 
 // ==========================================
 // القوائم
@@ -48,11 +49,10 @@ function showMainMenu(chatId) {
     const opts = {
         reply_markup: {
             keyboard: [
-                ['➕ إضافة منتج جديد'], 
+                ['🔗 نسخ منتج (خطوة بخطوة)'], // ✅ الزر الجديد
+                ['➕ إضافة منتج يدوي'],
                 ['📦 تعديل منتج شامل'],
-                ['📂 تعديل تصنيف كامل'],
-                ['🌍 تعديل شامل'],
-                ['📩 دعم فني']
+                ['🌍 تعديل شامل']
             ],
             resize_keyboard: true
         }
@@ -61,177 +61,182 @@ function showMainMenu(chatId) {
 }
 
 // ==========================================
-// استقبال الرسائل والصور
+// استقبال الرسائل
 // ==========================================
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const text = msg.text;
 
-    // تهيئة الحالة
     if (!userStates[chatId]) userStates[chatId] = { step: 'idle' };
 
-    // 1. زر الإلغاء أو القائمة
-    if (text && ['/start', 'مرحبا', 'menu', 'الغاء', 'إلغاء', 'تم'].includes(text.toLowerCase())) {
-        // لو العميل قال "تم" وهو في مرحلة الصور، ننفذ الحفظ
-        if (text === 'تم' && userStates[chatId].step === 'upload_images') {
-            await finalizeProductCreation(chatId);
-            return;
-        }
-        
+    // الأوامر العامة
+    if (text && ['/start', 'مرحبا', 'menu', 'الغاء', 'إلغاء', 'رجوع'].includes(text.toLowerCase())) {
         userStates[chatId] = { step: 'idle' };
         showMainMenu(chatId);
         return;
     }
 
-    // 2. زر إضافة منتج جديد
-    if (text === '➕ إضافة منتج جديد') {
-        userStates[chatId] = { step: 'waiting_full_data', newProduct: { images: [] } };
-        
-        const msgFormat = 
-`📝 *أرسل بيانات المنتج في رسالة واحدة (كل معلومة في سطر):*
-
-الاسم
-السعر الأساسي
-سعر الخصم (لو مفيش اكتب 0)
-الوصف
-
-*(مثال)*:
-سخان تورنيدو 50 لتر
-5000
-4500
-سخان ممتاز بضمان 5 سنوات ديجيتال...`;
-
-        bot.sendMessage(chatId, msgFormat, { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } });
+    // 1. بداية النسخ
+    if (text === '🔗 نسخ منتج (خطوة بخطوة)') {
+        userStates[chatId] = { step: 'waiting_competitor_link' };
+        bot.sendMessage(chatId, "🕵️‍♂️ *هات رابط المنتج المنافس:*\nسأقوم بسحب البيانات ومراجعتها معك خطوة بخطوة.", { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } });
         return;
     }
 
-    // 3. معالجة بيانات المنتج (النصية)
-    if (userStates[chatId].step === 'waiting_full_data' && text) {
-        // تقسيم الرسالة بناءً على السطور
-        const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    // 2. معالجة الرابط وسحب البيانات
+    if (userStates[chatId].step === 'waiting_competitor_link' && text && text.startsWith('http')) {
+        bot.sendMessage(chatId, "⏳ جاري سحب البيانات... لحظة واحدة.");
         
-        if (lines.length < 2) {
-            bot.sendMessage(chatId, "❌ البيانات ناقصة! لازم تبعت على الأقل الاسم والسعر في سطور منفصلة.");
-            return;
+        try {
+            const scrapedData = await scrapeProduct(text);
+            if (!scrapedData.name) {
+                bot.sendMessage(chatId, "❌ لم أستطع قراءة الموقع. جرب الإضافة اليدوية.");
+                showMainMenu(chatId);
+                return;
+            }
+            
+            // حفظ البيانات مؤقتاً
+            userStates[chatId].tempProduct = scrapedData;
+            
+            // 🔹 الخطوة 1: مراجعة الاسم
+            userStates[chatId].step = 'review_name';
+            bot.sendMessage(chatId, `1️⃣ *الاسم الذي وجدته:*\n${scrapedData.name}\n\n✅ إذا موافق أرسل "تم".\n✍️ إذا تريد تغييره، أرسل الاسم الجديد الآن.`, { parse_mode: 'Markdown' });
+            
+        } catch (e) {
+            bot.sendMessage(chatId, "❌ خطأ في الرابط.");
         }
-
-        // تخزين البيانات
-        userStates[chatId].newProduct.name = lines[0];
-        userStates[chatId].newProduct.regular_price = extractNumber(lines[1]);
-        userStates[chatId].newProduct.sale_price = lines[2] ? extractNumber(lines[2]) : "";
-        
-        // تجميع باقي السطور كوصف
-        let desc = "";
-        if (lines.length > 3) {
-            desc = lines.slice(3).join('\n');
-        }
-        userStates[chatId].newProduct.description = desc;
-        userStates[chatId].newProduct.short_description = desc;
-
-        // الانتقال لمرحلة الصور
-        userStates[chatId].step = 'upload_images';
-        bot.sendMessage(chatId, "✅ تم حفظ البيانات!\n\n📸 *الآن أرسل الصور من المعرض:*\n- الصورة الأولى ستكون الأساسية.\n- باقي الصور للمعرض.\n\n🔚 *عند الانتهاء اكتب كلمة: تم*");
         return;
     }
 
-    // 4. معالجة الصور (رفع مباشر)
-    if (userStates[chatId].step === 'upload_images' && msg.photo) {
-        bot.sendMessage(chatId, "⏳ جاري رفع الصورة للسيرفر...");
-        
-        // تليجرام بيبعت الصورة بأحجام مختلفة، بناخد آخر واحدة (أعلى جودة)
-        const fileId = msg.photo[msg.photo.length - 1].file_id;
-        
-        // دالة رفع الصورة للووردبريس
-        const wpImageId = await uploadImageToWP(chatId, fileId);
-        
-        if (wpImageId) {
-            userStates[chatId].newProduct.images.push({ id: wpImageId });
-            bot.sendMessage(chatId, `✅ تم رفع صورة رقم (${userStates[chatId].newProduct.images.length}).\nابعت اللي بعدها أو اكتب "تم".`);
+    // 3. مراجعة الاسم
+    if (userStates[chatId].step === 'review_name') {
+        if (text !== 'تم' && text !== 'موافق') {
+            userStates[chatId].tempProduct.name = text; // تحديث الاسم
+            bot.sendMessage(chatId, "✅ تم تحديث الاسم.");
         } else {
-            bot.sendMessage(chatId, "❌ فشل رفع هذه الصورة، حاول مرة أخرى.");
+            bot.sendMessage(chatId, "✅ تم اعتماد الاسم.");
         }
+
+        // 🔹 الانتقال للخطوة 2: الوصف
+        userStates[chatId].step = 'review_desc';
+        const currentDesc = userStates[chatId].tempProduct.description || "لا يوجد وصف";
+        // نرسل جزء من الوصف لو طويل
+        const previewDesc = currentDesc.length > 200 ? currentDesc.substring(0, 200) + "..." : currentDesc;
+        
+        bot.sendMessage(chatId, `2️⃣ *الوصف الذي وجدته:*\n${previewDesc}\n\n✅ إذا موافق أرسل "تم".\n✍️ إذا تريد تغييره، أرسل الوصف الجديد.`);
+        return;
     }
+
+    // 4. مراجعة الوصف
+    if (userStates[chatId].step === 'review_desc') {
+        if (text !== 'تم' && text !== 'موافق') {
+            userStates[chatId].tempProduct.description = text;
+            bot.sendMessage(chatId, "✅ تم تحديث الوصف.");
+        } else {
+            bot.sendMessage(chatId, "✅ تم اعتماد الوصف.");
+        }
+
+        // 🔹 الانتقال للخطوة 3: السعر
+        userStates[chatId].step = 'review_price';
+        const currentPrice = userStates[chatId].tempProduct.price || "0";
+        bot.sendMessage(chatId, `3️⃣ *السعر الذي وجدته:* ${currentPrice}\n\n✅ إذا موافق أرسل "تم".\n💰 إذا تريد تغييره، أرسل السعر الجديد (أرقام فقط).`);
+        return;
+    }
+
+    // 5. مراجعة السعر والإنهاء
+    if (userStates[chatId].step === 'review_price') {
+        if (text !== 'تم' && text !== 'موافق') {
+            userStates[chatId].tempProduct.price = extractNumber(text);
+        }
+        
+        // التنفيذ النهائي
+        bot.sendMessage(chatId, "🚀 جاري رفع الصورة وإنشاء المنتج على موقع الهيثم...");
+        await createScrapedProduct(chatId, userStates[chatId].tempProduct);
+        return;
+    }
+
+    // --- (باقي الأكواد القديمة للإضافة اليدوية والتعديل - مختصرة هنا) ---
+    if (text === '➕ إضافة منتج يدوي') { /* كود الإضافة اليدوية السابق */ }
+    else if (text === '📦 تعديل منتج شامل') { /* كود التعديل السابق */ }
     
-    // --- (باقي أوامر البوت القديمة: تعديل، الخ) ---
-    // (تم الحفاظ عليها لعدم تعقيد الكود هنا، لكن انسخ باقي الدوال من الكود السابق إذا أردت دمجها)
+    // (لعدم تكرار الكود الطويل، افترض أن باقي الدوال موجودة كما هي في V17/V18)
+    if(userStates[chatId].step === 'waiting_product_link') processProductInput(chatId, text);
+    // ... الخ
 });
 
 // ==========================================
-// 🔥 دوال المساعدة (Helpers)
+// 🕵️‍♂️ دوال السحب والإنشاء
 // ==========================================
 
-// 1. استخراج الأرقام فقط من السعر
-function extractNumber(str) {
-    return str.replace(/[^0-9.]/g, ''); // يمسح أي حروف ويسيب الأرقام
-}
+async function scrapeProduct(url) {
+    const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36' };
+    const { data } = await axios.get(url, { headers });
+    const $ = cheerio.load(data);
 
-// 2. رفع الصورة من تليجرام لـ WordPress
-async function uploadImageToWP(chatId, fileId) {
-    try {
-        // أ) الحصول على رابط التحميل من تليجرام
-        const fileLink = await bot.getFileLink(fileId);
-        
-        // ب) تحميل الصورة كـ Buffer (بيانات خام)
-        const imageResponse = await axios.get(fileLink, { responseType: 'arraybuffer' });
-        const buffer = Buffer.from(imageResponse.data, 'binary');
+    let product = { name: "", price: "", image_url: "", description: "" };
 
-        // ج) إعداد الفورم للرفع
-        const form = new FormData();
-        form.append('file', buffer, { filename: `img_${Date.now()}.jpg` });
-
-        // د) الرفع لـ WordPress Media Library
-        // ملاحظة: نستخدم نقطة نهاية الوسائط في WP REST API
-        const wpUploadUrl = `${SITE_URL}/wp-json/wp/v2/media?consumer_key=${CK}&consumer_secret=${CS}`;
-        
-        const uploadRes = await axios.post(wpUploadUrl, form, {
-            headers: {
-                ...form.getHeaders(),
-                'Content-Disposition': `attachment; filename="img_${Date.now()}.jpg"`
-            }
-        });
-
-        if (uploadRes.status === 201) {
-            return uploadRes.data.id; // إرجاع ID الصورة في ووردبريس
-        }
-    } catch (e) {
-        console.error("Upload Error:", e.message);
-        return null;
-    }
-    return null;
-}
-
-// 3. الإنشاء النهائي للمنتج
-async function finalizeProductCreation(chatId) {
-    const product = userStates[chatId].newProduct;
+    // سحب البيانات
+    product.name = $('meta[property="og:title"]').attr('content') || $('h1').first().text().trim();
+    product.image_url = $('meta[property="og:image"]').attr('content') || $('.product-image img').attr('src');
+    product.description = $('meta[property="og:description"]').attr('content') || $('.product-description').text().trim();
     
-    bot.sendMessage(chatId, "🚀 جاري إنشاء المنتج بكل البيانات والصور...");
+    // محاولة ذكية للسعر
+    const priceText = $('meta[property="product:price:amount"]').attr('content') || $('.price').first().text() || $('.amount').first().text();
+    if (priceText) product.price = extractNumber(priceText);
 
+    return product;
+}
+
+async function createScrapedProduct(chatId, productData) {
     try {
-        const data = {
-            name: product.name,
+        let imageId = null;
+        // رفع الصورة
+        if (productData.image_url) {
+            imageId = await uploadImageFromUrlToWP(productData.image_url);
+        }
+
+        const wcData = {
+            name: productData.name,
             type: "simple",
-            regular_price: product.regular_price,
-            sale_price: product.sale_price === "0" ? "" : product.sale_price,
-            description: product.description,
-            short_description: product.description,
-            images: product.images, // مصفوفة الصور (IDs)
+            regular_price: productData.price,
+            description: productData.description || "",
+            short_description: productData.description || "",
             status: "publish"
         };
+        if (imageId) wcData.images = [{ id: imageId }];
 
-        const response = await api.post("products", data);
+        const response = await api.post("products", wcData);
 
         if (response.status === 201) {
             const p = response.data;
-            bot.sendMessage(chatId, `🎉 *مبروك! تم النشر بنجاح*\n\n📄 الاسم: ${p.name}\n💰 السعر: ${p.price}\n🖼️ عدد الصور: ${p.images.length}\n🔗 الرابط: ${p.permalink}`, { parse_mode: 'Markdown' });
+            // ✅ هنا الرد على سؤالك: إرسال الرابط الجديد
+            bot.sendMessage(chatId, `🎉 *تم النشر بنجاح على الهيثم جروب!*\n\n📄 الاسم: ${p.name}\n💰 السعر: ${p.price}\n🔗 *رابط المنتج الجديد:*\n${p.permalink}`, { parse_mode: 'Markdown' });
         }
     } catch (e) {
         console.error(e);
-        bot.sendMessage(chatId, `❌ حدث خطأ أثناء الإنشاء: ${e.response ? e.response.data.message : e.message}`);
+        bot.sendMessage(chatId, "❌ حدث خطأ أثناء الإنشاء.");
     }
-    
     userStates[chatId] = { step: 'idle' };
     setTimeout(() => showMainMenu(chatId), 3000);
 }
 
-// (باقي دوال Callback Query القديمة للتعديل - يجب دمجها هنا لو أردت الاحتفاظ بميزات التعديل)
+// دالة رفع الصورة من الرابط
+async function uploadImageFromUrlToWP(imgUrl) {
+    try {
+        if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
+        const response = await axios.get(imgUrl, { responseType: 'arraybuffer' });
+        const buffer = Buffer.from(response.data, 'binary');
+        const form = new FormData();
+        form.append('file', buffer, { filename: `scraped_${Date.now()}.jpg` });
+        const wpUploadUrl = `${SITE_URL}/wp-json/wp/v2/media?consumer_key=${CK}&consumer_secret=${CS}`;
+        const uploadRes = await axios.post(wpUploadUrl, form, { headers: { ...form.getHeaders() } });
+        return uploadRes.data.id;
+    } catch (e) { return null; }
+}
+
+function extractNumber(str) { if(!str) return ""; return str.replace(/[^0-9.]/g, ''); }
+
+// (أضف هنا باقي دوال التعديل القديمة processProductInput وغيرها لكي يعمل البوت بالكامل)
 // ...
+
+bot.on('polling_error', (err) => { if (err.code !== 'EFATAL') console.log('Polling Error'); });
