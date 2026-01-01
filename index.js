@@ -36,11 +36,11 @@ const ADMIN_EMAIL = 'influencetargetingmarketing3@gmail.com';
 const bot = new TelegramBot(token, {polling: true});
 const userStates = {}; 
 
-app.get('/', (req, res) => res.send('Bot V23 (Bad Name Filter) 🛡️'));
+app.get('/', (req, res) => res.send('Bot V24 (Fix Dependencies & Filter) 🛡️'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running`));
 
-console.log('✅ البوت جاهز V23...');
+console.log('✅ البوت جاهز V24...');
 
 // ==========================================
 // القوائم
@@ -52,6 +52,7 @@ function showMainMenu(chatId) {
                 ['🔗 نسخ منتج / إضافة سريع'], 
                 ['📦 تعديل منتج شامل'],
                 ['🗑️ حذف منتج'],
+                ['📂 تعديل تصنيف'],
                 ['🌍 تعديل شامل']
             ],
             resize_keyboard: true
@@ -81,7 +82,7 @@ bot.on('message', async (msg) => {
     // ========================
     if (text === '🔗 نسخ منتج / إضافة سريع') {
         userStates[chatId] = { step: 'waiting_link_or_manual' };
-        bot.sendMessage(chatId, "🕵️‍♂️ *أرسل رابط المنتج المنافس:*\n(لو فشل السحب سننتقل للإدخال اليدوي فوراً).", { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } });
+        bot.sendMessage(chatId, "🕵️‍♂️ *أرسل رابط المنتج المنافس:*\n(سأقوم بفحص الرابط، وإذا كان محمياً سننتقل للإدخال اليدوي فوراً).", { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } });
         return;
     }
 
@@ -99,13 +100,13 @@ bot.on('message', async (msg) => {
                 bot.sendMessage(chatId, `✅ *نجحت العملية!*\n\n1️⃣ *الاسم:* \n${scrapedData.name}\n\n(أرسل "تم" للموافقة، أو أرسل اسماً جديداً).`, { parse_mode: 'Markdown' });
                 
             } catch (e) {
-                // 🔥 هنا الفلتر اشتغل: الموقع محمي أو الاسم غلط
+                // 🔥 الفلتر اشتغل: الموقع محمي أو الاسم غلط
                 console.log("Fallback triggered:", e.message);
                 
                 userStates[chatId].tempProduct = { images: [] };
                 userStates[chatId].step = 'manual_name'; 
                 
-                bot.sendMessage(chatId, "⚠️ *تعذر نسخ البيانات (الموقع محمي).*\n\n✋ ولا يهمك، هنكمل يدوي.\n\n1️⃣ *اكتب اسم المنتج:*");
+                bot.sendMessage(chatId, "⚠️ *الموقع محمي (أو البيانات غير واضحة).*\n\n✋ ولا يهمك، هنكمل يدوي.\n\n1️⃣ *اكتب اسم المنتج:*");
             }
         } 
         // لو نص عادي (إدخال يدوي مباشر)
@@ -173,7 +174,6 @@ bot.on('message', async (msg) => {
     // --- مرحلة رفع الصور ---
     if (userStates[chatId].step === 'upload_images') {
         if (text === 'تم') {
-            // التأكد من وجود صورة واحدة على الأقل
             const imgs = userStates[chatId].tempProduct.images || [];
             if (imgs.length === 0) {
                 bot.sendMessage(chatId, "⚠️ لازم ترفع صورة واحدة على الأقل! ابعت صورة.");
@@ -196,13 +196,52 @@ bot.on('message', async (msg) => {
         return;
     }
 
-    // (باقي الأكواد: تعديل وحذف)
+    // (باقي الأكواد: حذف وتعديل)
     if (text === '🗑️ حذف منتج') { userStates[chatId].step = 'waiting_delete_link'; bot.sendMessage(chatId, "رقم الـ ID للحذف:"); }
-    if (userStates[chatId].step === 'waiting_delete_link') { /* كود الحذف */ } // (نفس كود الحذف السابق)
+    if (userStates[chatId].step === 'waiting_delete_link') { 
+        bot.sendMessage(chatId, "🔎 جاري البحث...");
+        try {
+            let params = {};
+            if (/^\d+$/.test(text.trim())) params = { include: [text.trim()] };
+            else {
+                let cleanUrl = decodeURIComponent(text.split('?')[0]);
+                if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
+                params = { slug: cleanUrl.split('/').pop() };
+            }
+            const res = await api.get("products", params);
+            if (res.data.length > 0) {
+                const p = res.data[0];
+                userStates[chatId].deleteId = p.id;
+                bot.sendMessage(chatId, `⚠️ *حذف:* ${p.name}؟`, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{text:'✅ نعم',callback_data:'confirm_delete_yes'},{text:'❌ لا',callback_data:'confirm_delete_no'}]] } });
+            } else bot.sendMessage(chatId, "❌ غير موجود.");
+        } catch(e) { bot.sendMessage(chatId, "❌ خطأ."); }
+    }
+
     if (text === '📦 تعديل منتج شامل') { userStates[chatId].step = 'waiting_product_link'; bot.sendMessage(chatId, "الرابط:"); }
-    if (userStates[chatId].step === 'waiting_product_link') processProductInput(chatId, text);
-    // ...
+    if(userStates[chatId].step === 'waiting_product_link') processProductInput(chatId, text);
 });
+
+// Callback Query (للحذف)
+bot.on('callback_query', async (query) => {
+    const chatId = query.message.chat.id;
+    const data = query.data;
+
+    if (data === 'confirm_delete_yes') {
+        const idToDelete = userStates[chatId].deleteId;
+        bot.sendMessage(chatId, "⏳ جاري الحذف...");
+        try {
+            await api.delete(`products/${idToDelete}`, { force: true });
+            bot.sendMessage(chatId, "🗑️✅ تم الحذف.");
+        } catch (e) { bot.sendMessage(chatId, "❌ فشل."); }
+        userStates[chatId] = { step: 'idle' };
+    } 
+    else if (data === 'confirm_delete_no') {
+        bot.sendMessage(chatId, "✅ تم الإلغاء.");
+        userStates[chatId] = { step: 'idle' };
+    }
+    bot.answerCallbackQuery(query.id);
+});
+
 
 // ==========================================
 // 🕵️‍♂️ دوال السحب (مع الفلتر الذكي)
@@ -218,8 +257,8 @@ async function scrapeProduct(url) {
         // 1. سحب الاسم
         product.name = $('meta[property="og:title"]').attr('content') || $('h1').first().text().trim();
         
-        // 🛑 فلتر الأسماء المرفوضة (عشان ميجبش "الموافقة")
-        const badNames = ['الموافقة', 'الموافقه', 'Just a moment', 'Access Denied', 'Attention Required', 'Security Check'];
+        // 🛑 فلتر الأسماء المرفوضة
+        const badNames = ['الموافقة', 'الموافقه', 'Just a moment', 'Access Denied', 'Attention Required', 'Security Check', 'Cloudflare'];
         if (!product.name || badNames.some(bad => product.name.includes(bad))) {
             throw new Error("Bad Name Detected");
         }
@@ -243,7 +282,6 @@ async function scrapeProduct(url) {
 async function createScrapedProduct(chatId, productData) {
     try {
         let finalImages = productData.images || [];
-        // محاولة رفع الصورة من الرابط لو مفيش صور مرفوعة
         if (finalImages.length === 0 && productData.image_url) {
             const imgId = await uploadImageFromUrlToWP(productData.image_url);
             if (imgId) finalImages.push({ id: imgId });
@@ -270,7 +308,7 @@ async function createScrapedProduct(chatId, productData) {
     setTimeout(() => showMainMenu(chatId), 3000);
 }
 
-// دوال الرفع والاستخراج (كما هي)
+// دوال رفع الصور
 async function uploadImageFromTelegram(fileId) {
     try {
         const fileLink = await bot.getFileLink(fileId);
@@ -283,8 +321,41 @@ async function uploadImageFromTelegram(fileId) {
         return uploadRes.data.id;
     } catch (e) { return null; }
 }
-async function uploadImageFromUrlToWP(imgUrl) { /* نفس الكود السابق */ return null; }
+async function uploadImageFromUrlToWP(imgUrl) { 
+    try {
+        if (imgUrl.startsWith('//')) imgUrl = 'https:' + imgUrl;
+        const response = await axios.get(imgUrl, { responseType: 'arraybuffer' });
+        const buffer = Buffer.from(response.data, 'binary');
+        const form = new FormData();
+        form.append('file', buffer, { filename: `scraped_${Date.now()}.jpg` });
+        const wpUploadUrl = `${SITE_URL}/wp-json/wp/v2/media?consumer_key=${CK}&consumer_secret=${CS}`;
+        const uploadRes = await axios.post(wpUploadUrl, form, { headers: { ...form.getHeaders() } });
+        return uploadRes.data.id;
+    } catch (e) { return null; }
+}
 function extractNumber(str) { if(!str) return ""; return str.replace(/[^0-9.]/g, ''); }
-// (باقي الدوال processProductInput وحذف المنتج...)
+
+async function processProductInput(chatId, text) {
+    bot.sendMessage(chatId, "🔎...");
+    try {
+        let params = {};
+        if (/^\d+$/.test(text.trim())) params = { include: [text.trim()] };
+        else {
+            let cleanUrl = decodeURIComponent(text.split('?')[0]);
+            if (cleanUrl.endsWith('/')) cleanUrl = cleanUrl.slice(0, -1);
+            params = { slug: cleanUrl.split('/').pop() };
+        }
+        const res = await api.get("products", params);
+        if (res.data.length > 0) {
+            const p = res.data[0];
+            userStates[chatId].productId = p.id;
+            userStates[chatId].regularPrice = parseFloat(p.regular_price || p.price);
+            bot.sendMessage(chatId, `✅ *${p.name}*\nID: ${p.id}\n💰 ${p.price}\n👇 اختر:`, {
+                parse_mode: 'Markdown',
+                reply_markup: { inline_keyboard: [[{text:'💵 سعر أساسي',callback_data:'single_fixed'},{text:'🏷️ خصم',callback_data:'single_sale'}],[{text:'📦 مخزون',callback_data:'stock_menu'},{text:'✍️ اسم',callback_data:'edit_name'}],[{text:'📝 وصف',callback_data:'edit_desc'}]] }
+            });
+        } else bot.sendMessage(chatId, "❌ غير موجود.");
+    } catch (e) { bot.sendMessage(chatId, "❌ خطأ."); }
+}
 
 bot.on('polling_error', (err) => { if (err.code !== 'EFATAL') console.log('Polling Error'); });
